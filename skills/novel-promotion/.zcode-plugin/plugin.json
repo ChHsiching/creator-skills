@@ -2,10 +2,5 @@
   "name": "novel-promotion",
   "version": "2026.8.16",
   "description": "Scout novels worth promoting and produce the promo video: selection, copywriting, source assembly, narration.",
-  "skills": [
-    "./fanqie-scout",
-    "./novel-copywrite",
-    "./generate-source-video",
-    "./narrate-video"
-  ]
+  "skills": "skills"
 }

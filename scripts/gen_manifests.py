@@ -99,9 +99,10 @@ def main() -> None:
                 "name": group,
                 "source": f"./skills/{group}",
                 "description": GROUP_META[group]["description"],
-                "skills": [f"./{skill}" for skill in skills],
+                "skills": [f"./skills/{skill}" for skill in skills],
                 "version": VERSION,
-            }            for group, skills in groups.items()
+            }
+            for group, skills in groups.items()
         ],
     }
     write_json(REPO_ROOT / ".claude-plugin" / "marketplace.json", claude_marketplace)
@@ -132,17 +133,23 @@ def main() -> None:
     write_json(REPO_ROOT / "marketplace.json", zcode_marketplace)
 
     # Channels 3-5: per-suite plugin manifests in each installer's preferred
-    # slot (.claude-plugin for Claude Code, .zcode-plugin for ZCode,
-    # .codex-plugin for Codex). Identical content — all three parsers accept
-    # the skills array (Codex: RawPluginManifestPaths untagged enum).
+    # slot. Each host gets its own most-native `skills` declaration, all
+    # resolving to the same skills/<group>/skills/ directory:
+    #   .claude-plugin  array  ["./skills/<skill>", ...]  (Claude Code style)
+    #   .zcode-plugin   "skills"                          (ZCode official style, android-emulator)
+    #   .codex-plugin   "./skills/"                       (Codex docs style)
     for group, skills in groups.items():
-        manifest = {
+        base = {
             "name": group,
             "version": VERSION,
             "description": GROUP_META[group]["description"],
-            "skills": [f"./{skill}" for skill in skills],
         }
-        for slot in (".claude-plugin", ".zcode-plugin", ".codex-plugin"):
+        by_slot = {
+            ".claude-plugin": {**base, "skills": [f"./skills/{skill}" for skill in skills]},
+            ".zcode-plugin": {**base, "skills": "skills"},
+            ".codex-plugin": {**base, "skills": "./skills/"},
+        }
+        for slot, manifest in by_slot.items():
             write_json(REPO_ROOT / "skills" / group / slot / "plugin.json", manifest)
 
     total = sum(len(s) for s in groups.values())

@@ -68,10 +68,10 @@ To develop a skill, go to its source repository (linked from each skill director
 ## Repo layout
 
 ```
-skills/<suite>/<skill>/…         vendored skill payloads (auto-synced — do not edit here)
-.claude-plugin/marketplace.json  skills CLI grouping + Claude Code + Codex marketplace
-marketplace.json                 ZCode marketplace
-skills/<suite>/.{claude,zcode,codex}-plugin/plugin.json   per-suite plugin manifests
-scripts/mapping.tsv              the group/skill/repo mapping — single source of truth
-scripts/sync.sh                  clone + vendor + regenerate manifests (local & CI)
+skills/<suite>/skills/<skill>/…     vendored skill payloads (auto-synced — do not edit here)
+.claude-plugin/marketplace.json     skills CLI grouping + Claude Code + Codex marketplace
+marketplace.json                    ZCode marketplace
+skills/<suite>/.{claude,zcode,codex}-plugin/plugin.json   per-suite plugin manifests (native form per host)
+scripts/mapping.tsv                 the group/skill/repo mapping — single source of truth
+scripts/sync.sh                     clone + vendor + regenerate manifests (local & CI)
 ```

@@ -3,8 +3,8 @@
   "version": "2026.8.16",
   "description": "Produce an original video from source material: planning, provider-agnostic voiceover, and 4K render polish.",
   "skills": [
-    "./video-forge",
-    "./tts-forge",
-    "./remotion-4k-polish"
+    "./skills/video-forge",
+    "./skills/tts-forge",
+    "./skills/remotion-4k-polish"
   ]
 }

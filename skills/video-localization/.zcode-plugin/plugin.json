@@ -2,10 +2,5 @@
   "name": "video-localization",
   "version": "2026.8.16",
   "description": "Bring an existing video over the language barrier: download it, transcribe, subtitle, and optionally re-voice it in Chinese.",
-  "skills": [
-    "./video-cooking",
-    "./video-download",
-    "./video-subtitle",
-    "./video-dubbing"
-  ]
+  "skills": "skills"
 }

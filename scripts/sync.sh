@@ -25,6 +25,8 @@ for repo in "${REPOS[@]}"; do
 done
 
 # --- 2. vendor each skill -----------------------------------------------------
+# Rebuild skills/ from scratch so renamed/removed mapping entries never linger.
+rm -rf "$ROOT/skills"
 for row in "${ROWS[@]}"; do
   IFS=$'\t' read -r group skill repo srcpath <<<"$row"
   src="$WORK/$repo"
@@ -40,7 +42,10 @@ for row in "${ROWS[@]}"; do
     echo "FATAL: $repo:$srcpath frontmatter name '$fname' != mapping '$skill'" >&2; exit 1;
   }
 
-  dest="$ROOT/skills/$group/$skill"
+  # skills/<group>/skills/<skill>/ — the nested "skills" dir inside each group
+  # is the one convention every plugin host (ZCode/Codex/Claude Code) and the
+  # skills CLI container scan agree on.
+  dest="$ROOT/skills/$group/skills/$skill"
   rm -rf "$dest"
   mkdir -p "$dest"
   cp -r "$src/." "$dest/"
