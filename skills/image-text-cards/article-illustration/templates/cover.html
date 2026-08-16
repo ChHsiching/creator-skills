@@ -1,0 +1,91 @@
+<!--
+  封面模板（纯排版 + SVG 小黑球点缀，不用生图）。
+  占位符同 page.html，另加：
+    {{TAG}}      顶部胶囊标签
+    {{TITLE}}    大标题（可含 <span class="accent">关键词</span>）
+    {{SUBTITLE}} 副标题（可含 .hl）
+    {{BY}}       页脚左侧署名
+  小黑球 SVG：两个，右上举牌 + 左下扛框。agent 可按主题替换牌面文字/动作。
+-->
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<style>
+  @font-face { font-family:'{{FONT_CN}}'; src:url('../assets/fonts/{{FONT_FILE}}'); }
+  @font-face { font-family:'{{FONT_MONO}}'; src:url('../assets/fonts/{{MONO_FILE}}'); }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { width:1080px; height:1440px; }
+  body {
+    font-family:'{{FONT_CN}}', serif;
+    background:{{BG}}; color:{{INK}};
+    padding:80px 90px 70px;
+    display:flex; flex-direction:column; position:relative;
+  }
+  .tag {
+    align-self:flex-start;
+    font-size:26px; color:{{MUTED}};
+    border:1.5px solid {{DASH}}; border-radius:30px;
+    padding:7px 24px;
+  }
+  .center { flex:1; display:flex; flex-direction:column; justify-content:center; }
+  .title {
+    font-size:104px; font-weight:bold; line-height:1.18;
+    color:{{INK}}; letter-spacing:2px;
+  }
+  .title .accent { color:{{ACCENT}}; }
+  .subtitle {
+    font-size:36px; color:#6a6048; line-height:1.65; margin-top:34px;
+  }
+  .subtitle .hl { color:{{ACCENT}}; font-weight:bold; }
+  .foot {
+    display:flex; justify-content:space-between; align-items:center;
+    border-top:2px dashed {{DASH}}; padding-top:20px;
+    font-size:26px; color:#a89d7d;
+  }
+  .foot .by { color:#5a503a; font-weight:bold; }
+  .blob { position:absolute; }
+</style>
+</head>
+<body>
+  <div class="tag">{{TAG}}</div>
+
+  <div class="center">
+    <div class="title">{{TITLE}}</div>
+    <div class="subtitle">{{SUBTITLE}}</div>
+  </div>
+
+  <div class="foot">
+    <span class="by">{{BY}}</span>
+    <span>{{NUM}} / {{TOTAL}}</span>
+  </div>
+
+  <!-- 小黑球 1：右上，举牌 -->
+  <svg class="blob" style="top:150px; right:70px;" width="150" height="200" viewBox="0 0 150 200">
+    <rect x="20" y="6" width="110" height="56" rx="6" fill="#fffdf6" stroke="{{INK}}" stroke-width="2.5"/>
+    <text x="75" y="42" font-family="{{FONT_MONO}}" font-size="26" fill="{{ACCENT}}" text-anchor="middle" font-weight="bold">{{BLOB1_TEXT}}</text>
+    <line x1="75" y1="62" x2="75" y2="92" stroke="{{INK}}" stroke-width="2.5"/>
+    <ellipse cx="75" cy="130" rx="38" ry="42" fill="{{INK}}"/>
+    <circle cx="63" cy="124" r="5" fill="#fff"/>
+    <circle cx="87" cy="124" r="5" fill="#fff"/>
+    <line x1="75" y1="96" x2="60" y2="78" stroke="{{INK}}" stroke-width="3" stroke-linecap="round"/>
+    <line x1="75" y1="96" x2="90" y2="78" stroke="{{INK}}" stroke-width="3" stroke-linecap="round"/>
+    <line x1="65" y1="170" x2="60" y2="194" stroke="{{INK}}" stroke-width="3" stroke-linecap="round"/>
+    <line x1="85" y1="170" x2="90" y2="194" stroke="{{INK}}" stroke-width="3" stroke-linecap="round"/>
+  </svg>
+
+  <!-- 小黑球 2：左下，扛框（空白便签） -->
+  <svg class="blob" style="bottom:170px; left:55px;" width="140" height="180" viewBox="0 0 140 180">
+    <ellipse cx="70" cy="110" rx="36" ry="40" fill="{{INK}}"/>
+    <circle cx="58" cy="104" r="5" fill="#fff"/>
+    <circle cx="82" cy="104" r="5" fill="#fff"/>
+    <rect x="32" y="30" width="76" height="44" rx="5" fill="#fffdf6" stroke="{{INK}}" stroke-width="2.5"/>
+    <line x1="44" y1="52" x2="96" y2="52" stroke="{{DASH}}" stroke-width="2"/>
+    <line x1="44" y1="62" x2="84" y2="62" stroke="{{DASH}}" stroke-width="2"/>
+    <line x1="55" y1="92" x2="55" y2="74" stroke="{{INK}}" stroke-width="3" stroke-linecap="round"/>
+    <line x1="85" y1="92" x2="85" y2="74" stroke="{{INK}}" stroke-width="3" stroke-linecap="round"/>
+    <line x1="60" y1="148" x2="50" y2="174" stroke="{{INK}}" stroke-width="3" stroke-linecap="round"/>
+    <line x1="80" y1="148" x2="92" y2="172" stroke="{{INK}}" stroke-width="3" stroke-linecap="round"/>
+  </svg>
+</body>
+</html>

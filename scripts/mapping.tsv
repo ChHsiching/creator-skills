@@ -1,0 +1,17 @@
+# group<TAB>skill<TAB>source-repo<TAB>source-path-within-repo
+# The source-path "." means the skill lives at the repository root (SKILL.md at top level).
+# The SKILL.md frontmatter `name` of each entry MUST equal column 2; sync.sh verifies this and fails loudly.
+video-localization	video-cooking	video-cooking-skill	skills/video-cooking
+video-localization	video-download	video-download-skill	skills/video-download
+video-localization	video-subtitle	video-subtitle-skill	skills/video-subtitle
+video-localization	video-dubbing	video-dubbing-skill	skills/video-dubbing
+video-production	video-forge	video-forge	.
+video-production	tts-forge	tts-forge	.
+video-production	remotion-4k-polish	remotion-4k-polish	.
+image-text-cards	paged-article	paged-article-skill	.
+image-text-cards	xhs-cards	xhs-cards-skill	.
+image-text-cards	article-illustration	article-illustration-skill	skills/article-illustration
+novel-promotion	fanqie-scout	fanqie-scout-skill	.
+novel-promotion	novel-copywrite	novel-copywrite-skill	.
+novel-promotion	generate-source-video	generate-source-video-skill	.
+novel-promotion	narrate-video	narrate-video-skill	.

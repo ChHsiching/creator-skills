@@ -1,0 +1,120 @@
+<!--
+  内容页模板（上图下文）。
+  占位符（运行时替换）：
+    {{BG}}       页面背景色（与生图同色，默认 #FBF7EE）
+    {{INK}}      主文字色（默认 #2a2a2a）
+    {{ACCENT}}   强调色（默认 #d9534f）
+    {{MUTED}}    次要文字色（默认 #8a7f60）
+    {{DASH}}     分隔虚线色（默认 #c9bfa3）
+    {{CODEBG}}   代码块底色（默认 #f0eadb）
+    {{FONT_CN}}  正文中文字体名（默认 LXGW WenKai Lite）
+    {{FONT_MONO}}代码/英文等宽字体名（默认 LXGW WenKai Mono Lite）
+    {{FONT_FILE}}  正文中文字体文件名
+    {{MONO_FILE}}  等宽字体文件名
+    {{NUM}}      本页页码（如 02）
+    {{TOTAL}}    总页数（如 08）
+    {{CHAPTER}}  章节名（如 安装）
+    {{SERIES}}   系列名（页眉右侧，如 Matt Pocock skills 主线流程）
+    {{ILLO}}     插图文件路径（相对此 html，如 illustrations/01-install.png）
+    {{ILLO_H}}   插图高度 px（默认 600）。正文长/codeblock 多时调小到 340-520，
+                 正文短时保持 600。lint 溢出就调小，lint 空旷就调大。
+    {{TITLE}}    本页标题（可用 {{ACCENT}} 包裹关键词）
+    {{BODY}}     正文 HTML（段落/要点列表/代码块/便签，见 SKILL.md）
+    {{FOOTER_L}} 页脚左侧文字
+-->
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<style>
+  @font-face { font-family:'{{FONT_CN}}'; src:url('../assets/fonts/{{FONT_FILE}}'); }
+  @font-face { font-family:'{{FONT_MONO}}'; src:url('../assets/fonts/{{MONO_FILE}}'); }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { width:1080px; height:1440px; }
+  body {
+    font-family:'{{FONT_CN}}', serif;
+    background:{{BG}}; color:{{INK}};
+    padding:64px 80px 54px;
+    display:flex; flex-direction:column;
+  }
+  .header {
+    display:flex; align-items:center; justify-content:space-between;
+    border-bottom:2px dashed {{DASH}};
+    padding-bottom:14px; margin-bottom:22px;
+    font-size:25px; color:{{MUTED}}; letter-spacing:1px;
+  }
+  .header .ch { font-weight:bold; color:#5a503a; }
+  .header .dot { color:{{ACCENT}}; }
+  .illo {
+    width:100%; flex:0 0 auto; height:{{ILLO_H}}px;
+    display:flex; align-items:center; justify-content:center;
+    margin-bottom:24px;
+  }
+  .illo img { width:100%; height:100%; object-fit:contain; }
+  .text { flex:1; display:flex; flex-direction:column; }
+  .text h2 {
+    font-size:46px; font-weight:bold; color:{{INK}};
+    margin-bottom:14px; line-height:1.25;
+  }
+  .text h2 .accent { color:{{ACCENT}}; }
+  .text p { font-size:25px; line-height:1.72; color:#444; margin-bottom:11px; }
+  .text p .hl { color:{{ACCENT}}; font-weight:bold; }
+  .text .points { list-style:none; margin:4px 0 8px; }
+  .text .points li {
+    font-size:24px; line-height:1.68; color:#3a3a3a;
+    padding-left:28px; position:relative; margin-bottom:6px;
+  }
+  .text .points li::before {
+    content:'·'; position:absolute; left:8px; top:-6px;
+    color:{{ACCENT}}; font-size:38px; font-weight:bold;
+  }
+  .text code, .text .mono {
+    font-family:'{{FONT_MONO}}', monospace;
+    background:{{CODEBG}}; padding:1px 7px; border-radius:4px;
+    font-size:22px; color:#5a503a;
+  }
+  .codeblock {
+    font-family:'{{FONT_MONO}}', monospace;
+    background:{{CODEBG}}; border-radius:6px; padding:12px 16px;
+    font-size:22px; color:#5a503a; margin:6px 0 10px; line-height:1.5;
+    /* pre-wrap: 保留英文原文的换行和缩进；中文内容不手动加换行就会自然换行撑满 */
+    white-space:pre-wrap; word-break:break-word;
+  }
+  /* codeblock 顶部小标签（如「示例：xxx 的 prompt」），跟原文内容区分 */
+  .codeblock .label {
+    display:block; font-size:18px; color:#9a8f70;
+    margin-bottom:6px; letter-spacing:1px;
+  }
+  /* 便签块：正文里的提醒/坑/补充。左侧色条 + 浅底，跟普通段落区分 */
+  .note {
+    font-size:22px; color:#6a604a; background:{{CODEBG}};
+    border-left:4px solid {{ACCENT}}; padding:10px 14px; border-radius:0 4px 4px 0;
+    margin-top:8px; line-height:1.6;
+  }
+  .footer {
+    margin-top:auto; display:flex; align-items:center; justify-content:space-between;
+    border-top:2px dashed {{DASH}}; padding-top:14px;
+    font-size:23px; color:#a89d7d;
+  }
+  .footer .pg { font-weight:bold; color:#5a503a; }
+</style>
+</head>
+<body>
+  <div class="header">
+    <span><span class="ch">{{NUM}}</span> <span class="dot">·</span> {{CHAPTER}}</span>
+    <span>{{SERIES}}</span>
+  </div>
+
+  <div class="illo"><img src="{{ILLO}}" alt=""></div>
+
+  <div class="text">
+    <h2>{{TITLE}}</h2>
+    {{BODY}}
+  </div>
+
+  <div class="footer">
+    <span>{{FOOTER_L}}</span>
+    <span class="pg">{{NUM}} / {{TOTAL}}</span>
+  </div>
+</body>
+</html>

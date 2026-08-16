@@ -1,0 +1,4 @@
+# Drop custom reference voice clips here (.mp3 or .wav, 5-15s of clean solo speech).
+# The skill's Step 3 (Configure cloning) lists them as alternatives to the
+# auto-extracted reference. Files here are tracked by git (see .gitignore
+# `!voices/*.mp3` exception), so they ship with the skill if you fork it.

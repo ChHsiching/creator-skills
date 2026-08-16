@@ -1,0 +1,9 @@
+{
+  "name": "video-production",
+  "description": "Produce an original video from source material: planning, provider-agnostic voiceover, and 4K render polish.",
+  "skills": [
+    "./video-forge",
+    "./tts-forge",
+    "./remotion-4k-polish"
+  ]
+}

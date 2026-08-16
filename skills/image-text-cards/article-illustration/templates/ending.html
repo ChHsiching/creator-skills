@@ -1,0 +1,90 @@
+<!--
+  结尾页模板（纯排版 + SVG 小黑球挥手，总结收束）。
+  占位符同 page.html，另加：
+    {{SUMMARY}}   总结正文 HTML（如"对齐→拆解→实现"三步 + 原话引用）
+    {{NOTE}}      收尾小注（引用/出处/寄语，可选留空）
+-->
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<style>
+  @font-face { font-family:'{{FONT_CN}}'; src:url('../assets/fonts/{{FONT_FILE}}'); }
+  @font-face { font-family:'{{FONT_MONO}}'; src:url('../assets/fonts/{{MONO_FILE}}'); }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { width:1080px; height:1440px; }
+  body {
+    font-family:'{{FONT_CN}}', serif;
+    background:{{BG}}; color:{{INK}};
+    padding:64px 80px 54px;
+    display:flex; flex-direction:column; position:relative;
+  }
+  .header {
+    display:flex; align-items:center; justify-content:space-between;
+    border-bottom:2px dashed {{DASH}};
+    padding-bottom:14px; margin-bottom:30px;
+    font-size:25px; color:{{MUTED}}; letter-spacing:1px;
+  }
+  .header .ch { font-weight:bold; color:#5a503a; }
+  .header .dot { color:{{ACCENT}}; }
+  .center { flex:1; display:flex; flex-direction:column; justify-content:center; }
+  h2 { font-size:50px; font-weight:bold; color:{{INK}}; margin-bottom:30px; line-height:1.25; }
+  h2 .accent { color:{{ACCENT}}; }
+  .sum { font-size:27px; line-height:1.8; color:#555; margin-bottom:18px; }
+  .sum .hl { color:{{ACCENT}}; font-weight:bold; }
+  .sum code, .center code, .note code {
+    font-family:'{{FONT_MONO}}', monospace;
+    background:{{CODEBG}}; padding:1px 7px; border-radius:4px;
+    font-size:23px; color:#5a503a;
+  }
+  .codeblock {
+    font-family:'{{FONT_MONO}}', monospace;
+    background:{{CODEBG}}; border-radius:6px; padding:12px 16px;
+    font-size:23px; color:#5a503a; margin:6px 0 14px; line-height:1.5;
+    white-space:pre-wrap; word-break:break-word;
+  }
+  .codeblock .label {
+    display:block; font-size:19px; color:#9a8f70;
+    margin-bottom:6px; letter-spacing:1px;
+  }
+  .note {
+    font-size:24px; line-height:1.7; color:#8a7f60;
+    border-left:3px solid {{DASH}}; padding-left:18px; margin-top:10px;
+  }
+  .footer {
+    display:flex; align-items:center; justify-content:space-between;
+    border-top:2px dashed {{DASH}}; padding-top:14px;
+    font-size:23px; color:#a89d7d;
+  }
+  .footer .pg { font-weight:bold; color:#5a503a; }
+  .blob { position:absolute; }
+</style>
+</head>
+<body>
+  <div class="header">
+    <span><span class="ch">{{NUM}}</span> <span class="dot">·</span> {{CHAPTER}}</span>
+    <span>{{SERIES}}</span>
+  </div>
+
+  <div class="center">
+    <h2>{{TITLE}}</h2>
+    {{SUMMARY}}
+    <div class="note">{{NOTE}}</div>
+  </div>
+
+  <div class="footer">
+    <span>{{FOOTER_L}} · 完</span>
+    <span class="pg">{{NUM}} / {{TOTAL}}</span>
+  </div>
+
+  <!-- 小黑球：右下，挥手再见 -->
+  <svg class="blob" style="bottom:120px; right:70px;" width="120" height="170" viewBox="0 0 120 170">
+    <ellipse cx="60" cy="100" rx="34" ry="38" fill="{{INK}}"/>
+    <circle cx="49" cy="94" r="5" fill="#fff"/>
+    <circle cx="71" cy="94" r="5" fill="#fff"/>
+    <line x1="86" y1="86" x2="104" y2="64" stroke="{{INK}}" stroke-width="3.5" stroke-linecap="round"/>
+    <line x1="34" y1="138" x2="28" y2="162" stroke="{{INK}}" stroke-width="3" stroke-linecap="round"/>
+    <line x1="58" y1="138" x2="52" y2="162" stroke="{{INK}}" stroke-width="3" stroke-linecap="round"/>
+  </svg>
+</body>
+</html>

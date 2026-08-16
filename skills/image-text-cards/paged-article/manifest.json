@@ -1,0 +1,15 @@
+{
+  "name": "paged-article",
+  "version": "0.1.1",
+  "category": "Editorial · Any source → 3:4 paged Xiaohongshu article",
+  "description": "Turn any source (URL / file / pasted text / image) into a set of 3:4 vertical pages for Xiaohongshu — a beautiful-article-style essay, split one-chapter-per-page, each rendered as standalone HTML at 3x DPI. Embeds beautiful-article in full and adds a pagination + render layer.",
+  "homepage": "https://github.com/ChHsiching/paged-article-skill",
+  "compat": [
+    "claude-code",
+    "claude-ai",
+    "cursor",
+    "codex-cli",
+    "gemini-cli",
+    "opencode"
+  ]
+}

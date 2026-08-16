@@ -1,0 +1,51 @@
+{
+  "name": "creator-skills",
+  "owner": {
+    "name": "ChHsiching",
+    "url": "https://github.com/ChHsiching"
+  },
+  "plugins": [
+    {
+      "name": "video-localization",
+      "source": "./skills/video-localization",
+      "description": "Bring an existing video over the language barrier: download it, transcribe, subtitle, and optionally re-voice it in Chinese.",
+      "skills": [
+        "./video-cooking",
+        "./video-download",
+        "./video-subtitle",
+        "./video-dubbing"
+      ]
+    },
+    {
+      "name": "video-production",
+      "source": "./skills/video-production",
+      "description": "Produce an original video from source material: planning, provider-agnostic voiceover, and 4K render polish.",
+      "skills": [
+        "./video-forge",
+        "./tts-forge",
+        "./remotion-4k-polish"
+      ]
+    },
+    {
+      "name": "image-text-cards",
+      "source": "./skills/image-text-cards",
+      "description": "Turn articles and posts into vertical 3:4 image-text card decks for Xiaohongshu (小红书).",
+      "skills": [
+        "./paged-article",
+        "./xhs-cards",
+        "./article-illustration"
+      ]
+    },
+    {
+      "name": "novel-promotion",
+      "source": "./skills/novel-promotion",
+      "description": "Scout novels worth promoting and produce the promo video: selection, copywriting, source assembly, narration.",
+      "skills": [
+        "./fanqie-scout",
+        "./novel-copywrite",
+        "./generate-source-video",
+        "./narrate-video"
+      ]
+    }
+  ]
+}

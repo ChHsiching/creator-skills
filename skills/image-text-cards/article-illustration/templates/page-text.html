@@ -1,0 +1,108 @@
+<!--
+  文字加页模板（无插图，整页文字）。
+  用于「官方模板解读 / 中文翻译 / 填好的示例」这类信息密度高、不需要插图的页面。
+
+  跟 page.html 的区别：
+    - 无 .illo 块（整页给文字）
+    - 多 {{LEAD}} 字段（标题下一行的引导句，可留空）
+    - 多 .h3 小节标题样式（解读页常用「第一段 / 第二段」分节）
+    - codeblock 支持顶部 .label 小标签（如「示例：xxx 的 prompt」）
+
+  占位符（运行时替换）：
+    {{LEAD}}     标题下的引导句（可留空 ""）。注意：不要写「上一页是…这一页要…」
+                 这类跨页承接元话（见 WRITING.md）。只放真正的结构索引或留空。
+    其余占位符同 page.html（BG/INK/.../NUM/TOTAL/CHAPTER/SERIES/TITLE/BODY/FOOTER_L）
+-->
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<style>
+  @font-face { font-family:'{{FONT_CN}}'; src:url('../assets/fonts/{{FONT_FILE}}'); }
+  @font-face { font-family:'{{FONT_MONO}}'; src:url('../assets/fonts/{{MONO_FILE}}'); }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { width:1080px; height:1440px; }
+  body {
+    font-family:'{{FONT_CN}}', serif;
+    background:{{BG}}; color:{{INK}};
+    padding:64px 80px 54px;
+    display:flex; flex-direction:column;
+  }
+  .header {
+    display:flex; align-items:center; justify-content:space-between;
+    border-bottom:2px dashed {{DASH}};
+    padding-bottom:14px; margin-bottom:28px;
+    font-size:25px; color:{{MUTED}}; letter-spacing:1px;
+  }
+  .header .ch { font-weight:bold; color:#5a503a; }
+  .header .dot { color:{{ACCENT}}; }
+  .text { flex:1; display:flex; flex-direction:column; }
+  .text h2 {
+    font-size:46px; font-weight:bold; color:{{INK}};
+    margin-bottom:8px; line-height:1.25;
+  }
+  .text h2 .accent { color:{{ACCENT}}; }
+  .text .lead {
+    font-size:23px; color:#7a6f50; margin-bottom:18px; letter-spacing:1px;
+  }
+  .text h3 {
+    font-size:28px; font-weight:bold; color:#5a503a;
+    margin:18px 0 10px; padding-bottom:6px; border-bottom:1px solid {{DASH}};
+  }
+  .text p { font-size:24px; line-height:1.72; color:#444; margin-bottom:10px; }
+  .text p .hl { color:{{ACCENT}}; font-weight:bold; }
+  .text .points { list-style:none; margin:4px 0 10px; }
+  .text .points li {
+    font-size:23px; line-height:1.68; color:#3a3a3a;
+    padding-left:30px; position:relative; margin-bottom:6px;
+  }
+  .text .points li::before {
+    content:'·'; position:absolute; left:10px; top:-6px;
+    color:{{ACCENT}}; font-size:38px; font-weight:bold;
+  }
+  .text code, .text .mono {
+    font-family:'{{FONT_MONO}}', monospace;
+    background:{{CODEBG}}; padding:1px 7px; border-radius:4px;
+    font-size:21px; color:#5a503a;
+  }
+  .codeblock {
+    font-family:'{{FONT_MONO}}', monospace;
+    background:{{CODEBG}}; border-radius:6px; padding:14px 18px;
+    font-size:21px; color:#5a503a; margin:6px 0 12px; line-height:1.55;
+    white-space:pre-wrap; word-break:break-word;
+  }
+  .codeblock .label {
+    display:block; font-size:18px; color:#9a8f70;
+    margin-bottom:6px; letter-spacing:1px;
+  }
+  .note {
+    font-size:22px; color:#6a604a; background:{{CODEBG}};
+    border-left:4px solid {{ACCENT}}; padding:10px 14px; border-radius:0 4px 4px 0;
+    margin-top:6px; line-height:1.6;
+  }
+  .footer {
+    margin-top:auto; display:flex; align-items:center; justify-content:space-between;
+    border-top:2px dashed {{DASH}}; padding-top:14px;
+    font-size:23px; color:#a89d7d;
+  }
+  .footer .pg { font-weight:bold; color:#5a503a; }
+</style>
+</head>
+<body>
+  <div class="header">
+    <span><span class="ch">{{NUM}}</span> <span class="dot">·</span> {{CHAPTER}}</span>
+    <span>{{SERIES}}</span>
+  </div>
+
+  <div class="text">
+    <h2>{{TITLE}}</h2>
+    <div class="lead">{{LEAD}}</div>
+    {{BODY}}
+  </div>
+
+  <div class="footer">
+    <span>{{FOOTER_L}}</span>
+    <span class="pg">{{NUM}} / {{TOTAL}}</span>
+  </div>
+</body>
+</html>
