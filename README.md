@@ -23,6 +23,8 @@ npx skills add ChHsiching/creator-skills
 
 The picker shows the skills grouped by suite; select across suites freely. Use `-g` to install to `~/.agents/skills` (all your projects) instead of the current project, `--skill <name>` to skip the picker.
 
+> The first install clones the whole repo (~80 MB — the image-text suite ships its rendering fonts). On a slow connection, prefix the command with `SKILLS_CLONE_TIMEOUT_MS=600000` if the clone times out.
+
 ### Claude Code — plugin marketplace
 
 ```
