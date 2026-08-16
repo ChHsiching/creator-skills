@@ -14,7 +14,8 @@
         "./video-download",
         "./video-subtitle",
         "./video-dubbing"
-      ]
+      ],
+      "version": "2026.8.16"
     },
     {
       "name": "video-production",
@@ -24,7 +25,8 @@
         "./video-forge",
         "./tts-forge",
         "./remotion-4k-polish"
-      ]
+      ],
+      "version": "2026.8.16"
     },
     {
       "name": "image-text-cards",
@@ -34,7 +36,8 @@
         "./paged-article",
         "./xhs-cards",
         "./article-illustration"
-      ]
+      ],
+      "version": "2026.8.16"
     },
     {
       "name": "novel-promotion",
@@ -45,7 +48,8 @@
         "./novel-copywrite",
         "./generate-source-video",
         "./narrate-video"
-      ]
+      ],
+      "version": "2026.8.16"
     }
   ]
 }

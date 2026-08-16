@@ -11,28 +11,32 @@
       "description": "Bring an existing video over the language barrier: download it, transcribe, subtitle, and optionally re-voice it in Chinese.",
       "source": "./skills/video-localization",
       "category": "video",
-      "homepage": "https://github.com/ChHsiching/creator-skills"
+      "homepage": "https://github.com/ChHsiching/creator-skills",
+      "version": "2026.8.16"
     },
     {
       "name": "video-production",
       "description": "Produce an original video from source material: planning, provider-agnostic voiceover, and 4K render polish.",
       "source": "./skills/video-production",
       "category": "video",
-      "homepage": "https://github.com/ChHsiching/creator-skills"
+      "homepage": "https://github.com/ChHsiching/creator-skills",
+      "version": "2026.8.16"
     },
     {
       "name": "image-text-cards",
       "description": "Turn articles and posts into vertical 3:4 image-text card decks for Xiaohongshu (小红书).",
       "source": "./skills/image-text-cards",
       "category": "image-text",
-      "homepage": "https://github.com/ChHsiching/creator-skills"
+      "homepage": "https://github.com/ChHsiching/creator-skills",
+      "version": "2026.8.16"
     },
     {
       "name": "novel-promotion",
       "description": "Scout novels worth promoting and produce the promo video: selection, copywriting, source assembly, narration.",
       "source": "./skills/novel-promotion",
       "category": "novel",
-      "homepage": "https://github.com/ChHsiching/creator-skills"
+      "homepage": "https://github.com/ChHsiching/creator-skills",
+      "version": "2026.8.16"
     }
   ]
 }

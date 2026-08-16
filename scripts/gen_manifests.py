@@ -14,11 +14,14 @@ Never edit the generated files by hand — change mapping.tsv / GROUP_META and r
 """
 
 import json
+import os
 import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MAPPING_TSV = REPO_ROOT / "scripts" / "mapping.tsv"
+# Date of the newest source-repo commit, set by sync.sh (e.g. "2026.8.17").
+VERSION = os.environ.get("CS_VERSION", "0.0.0")
 
 OWNER = {"name": "ChHsiching", "url": "https://github.com/ChHsiching"}
 REPO_URL = "https://github.com/ChHsiching/creator-skills"
@@ -97,8 +100,8 @@ def main() -> None:
                 "source": f"./skills/{group}",
                 "description": GROUP_META[group]["description"],
                 "skills": [f"./{skill}" for skill in skills],
-            }
-            for group, skills in groups.items()
+                "version": VERSION,
+            }            for group, skills in groups.items()
         ],
     }
     write_json(REPO_ROOT / ".claude-plugin" / "marketplace.json", claude_marketplace)
@@ -121,6 +124,7 @@ def main() -> None:
                 "source": f"./skills/{group}",
                 "category": GROUP_META[group]["category"],
                 "homepage": REPO_URL,
+                "version": VERSION,
             }
             for group in groups
         ],
@@ -134,6 +138,7 @@ def main() -> None:
     for group, skills in groups.items():
         manifest = {
             "name": group,
+            "version": VERSION,
             "description": GROUP_META[group]["description"],
             "skills": [f"./{skill}" for skill in skills],
         }

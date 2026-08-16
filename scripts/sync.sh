@@ -54,7 +54,14 @@ for row in "${ROWS[@]}"; do
   echo "  $group/$skill  <-  $repo"
 done
 
-# --- 3. regenerate manifests (single source: mapping.tsv) --------------------
-python3 scripts/gen_manifests.py
+# --- 3. version = date of the newest commit across all source repos --------
+# Content-freshness versioning: stable while no source changes (zero-noise
+# CI), jumps forward as soon as any source repo lands a new commit.
+NEWEST=$(for repo in "${REPOS[@]}"; do git -C "$WORK/$repo" log -1 --format=%cI; done | sort | tail -1)
+CS_VERSION=$(date -u -d "$NEWEST" +%Y.%-m.%-d)
+echo "version: $CS_VERSION (newest source commit $NEWEST)"
+
+# --- 4. regenerate manifests (single source: mapping.tsv) -------------------
+CS_VERSION="$CS_VERSION" python3 scripts/gen_manifests.py
 
 echo "sync done."
