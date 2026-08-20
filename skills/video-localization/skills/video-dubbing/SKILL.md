@@ -3,7 +3,7 @@ name: video-dubbing
 description: Replace a video's original English vocals with Chinese voiceover, then re-time the video so the picture matches the Chinese. Use when the user wants to dub a video into Chinese — mentions 中配 / 配音 / 中文配音 / 换原声, or has a cooked bilingual video and wants a second Chinese-narrated release, or another skill (e.g. video-cooking) hands off "video is done with subtitles, add a Chinese dub."
 ---
 
-Replace a video's original English vocals with **Chinese voiceover**, then **re-time the video** so picture stays in sync with the longer/shorter Chinese. The result is a second release — same picture, Chinese audio, Chinese subtitles burned in.
+Replace a video's original English vocals with **Chinese voiceover**, then **re-time the video** so picture stays in sync with the longer/shorter Chinese. The result is a second release — same picture, Chinese audio, bilingual ZH+EN subtitles burned in.
 
 This skill does the two creative parts the CLI can't: **translating for dubbing** (complete sentences, not the subtitle fragmentation) and **bi-directional re-timing** (slow down or speed up each video segment to match the Chinese audio, never stretching the audio). Deterministic execution (Demucs, ffmpeg, IndexTTS2) is handled by the [`cook`](https://github.com/ChHsiching/video-cook) CLI's `cook dub` subcommand, with this skill's `scripts/` as a fallback.
 
@@ -27,9 +27,9 @@ A new `dubbed/` stage folder added to the video's output directory, plus the fin
 6. `dubbed/_segments/sent_NNNN.wav` — per-cue IndexTTS2 output (cache, re-usable)
 7. `dubbed/_full/timeline.json` — the re-timed timeline (every cue's new start/end on the dubbed video's clock)
 8. `dubbed/_full/dub.wav` — the synthesized Chinese dub, placed on the new timeline
-9. `dubbed/_full/dubbing.srt` / `dubbing.merged.srt` — Chinese subtitles on the new timeline (working files; merged.srt is the shorten+merge-short version used for burning)
-10. `cooked/<name>.dubbed.mp4` — **the product**: raw video, re-timed, with Chinese dub + burned Chinese subtitles
-11. `cloud-srt/zh.dub.srt` — **the upload subtitle**: copy of `dubbing.merged.srt`, for platforms that accept soft subs (B站云字幕). Named simply, sits next to `cloud-srt/zh.srt` from `video-subtitle`.
+9. `dubbed/_full/dubbing.srt` / `dubbing.merged.srt` — Chinese subtitles on the new timeline (working files; merged.srt is the shorten+merge-short version), with `dubbing.en.srt` (full-sentence English on the new timeline) and `dubbing.bilingual.srt` (the biliteral union that actually gets burned) beside them
+10. `cooked/<name>.dubbed.mp4` — **the product**: raw video, re-timed, with Chinese dub + burned bilingual (ZH+EN) subtitles
+11. `cloud-srt/zh.dub.srt` and `cloud-srt/en.dub.srt` — **the upload subtitles**: copies of `dubbing.merged.srt` and `dubbing.en.srt`, for platforms that accept soft subs (B站云字幕). Named simply, they sit next to `cloud-srt/{zh,en}.srt` from `video-subtitle`.
 
 The run is not done until the final video plays end-to-end with synced audio and readable subtitles — see Step 8.
 
@@ -51,7 +51,8 @@ This skill adds `dubbed/` (working directory) and writes the final products to `
 ├── cloud-srt/                      ← upload subtitles live here
 │   ├── zh.srt                      ← from video-subtitle (untouched)
 │   ├── en.srt                      ← from video-subtitle (untouched)
-│   └── zh.dub.srt                  ← this skill's upload subtitle (copy of dubbing.merged.srt)
+│   ├── zh.dub.srt                  ← this skill's upload subtitle (copy of dubbing.merged.srt)
+│   └── en.dub.srt                  ← this skill's upload subtitle (copy of dubbing.en.srt)
 └── dubbed/                         ← this skill's working directory
     ├── _reference/
     │   └── ref.wav
@@ -61,13 +62,15 @@ This skill adds `dubbed/` (working directory) and writes the final products to `
     │   ├── _vsegs/                 ← per-segment re-timed video chunks
     │   ├── dub.wav
     │   ├── video_adjusted.mp4      ← re-timed video (before burn)
-    │   ├── dubbing.srt             ← working file (141 cues, pre-shorten)
-    │   └── dubbing.merged.srt      ← working file (187 cues, post-shorten; copied to cloud-srt)
+    │   ├── dubbing.srt             ← working file (ZH, pre-shorten)
+    │   ├── dubbing.en.srt          ← working file (full-sentence EN on the new clock)
+    │   ├── dubbing.merged.srt      ← working file (ZH, post-shorten; copied to cloud-srt)
+    │   └── dubbing.bilingual.srt   ← working file (biliteral union; what gets burned)
     ├── vocals.wav
     └── no_vocals.wav
 ```
 
-Rule: **`dubbed/` is the working directory; `cooked/<name>.dubbed.mp4` and `cloud-srt/zh.dub.srt` are the products.** Never touch `raw/`, `transcript/<name>.zh.srt`, `cooked/<name>.cooked.mp4`, or `cloud-srt/{zh,en}.srt` — those belong to `video-subtitle`. If this skill fails halfway, the bilingual cooked shipment is still complete.
+Rule: **`dubbed/` is the working directory; `cooked/<name>.dubbed.mp4` and `cloud-srt/{zh,en}.dub.srt` are the products.** Never touch `raw/`, `transcript/<name>.zh.srt`, `cooked/<name>.cooked.mp4`, or `cloud-srt/{zh,en}.srt` — those belong to `video-subtitle`. If this skill fails halfway, the bilingual cooked shipment is still complete.
 
 ## The pipeline
 
@@ -248,22 +251,22 @@ cook dub burn <output-root> <name> --python <indextts-venv>/Scripts/python.exe
 
 Produces `cooked/<name>.dubbed.mp4` and `video_adjusted.mp4` + `dub.wav` (intermediates under `dubbed/_full/`).
 
-**7b–7c are inside `cook dub burn`.** The same command also generates the Chinese subtitles (same `shorten` + `merge-short` + `ass` pipeline as `video-subtitle`) and burns them — you do not run those steps by hand. What `cook dub burn` uses, and why it differs from the bilingual release:
+**7b–7c are inside `cook dub burn`.** The same command also generates the subtitles and burns them — you do not run those steps by hand. It runs the same pipeline as `video-subtitle`'s bilingual release, on the dub's re-timed clock:
 
-- **Dub-specific subtitle style**: a shorter 70px bottom bar with font 48 and marginv 5 (the bilingual release's taller bar is for two lines; the dub is single-language Chinese, so it uses a tighter bar). These parameters are baked into `stage_burn`; the `--fontsize`/`--marginv` flags require the upstream `subtitles.py ass` parameterization (video-subtitle-skill commit 181914d).
-- **Upload subtitle**: `cook dub burn` copies the merged subtitle to `cloud-srt/zh.dub.srt` — same convention as `video-subtitle`'s `cloud-srt/zh.srt`. Simple name, sits next to its sibling, easy to find at upload time.
+- **Bilingual subtitle layout, same as the bilingual release.** The Chinese goes through `shorten` + `merge-short`; the full-sentence English (`dubbing.en.srt`, built from `en.full.srt` texts mapped onto the timeline's new cue windows — index-aligned by construction, since cue i's window is exactly where its Chinese audio plays) is unioned with it via `biliteral`; the result burns in the same 220px bottom bar and fonts as the bilingual release (`subtitles.py`'s bottom-bar defaults — no overrides, so the two can't drift). The union's repetition is role-swapped here: EN spans whole sentences while ZH fragments inside them, so **EN repeats across consecutive ZH cues by design** — the mirror of the bilingual release, where ZH repeats across EN fragments.
+- **Upload subtitles**: `cook dub burn` copies the merged Chinese to `cloud-srt/zh.dub.srt` and the retimed English to `cloud-srt/en.dub.srt` — same convention as `video-subtitle`'s `cloud-srt/{zh,en}.srt`. Simple names, sit next to their siblings, easy to find at upload time.
 
-**Quality gate — fan-out subagent review of the burned dub subtitles (mandatory, after `cook dub burn`).** `cloud-srt/zh.dub.srt` is what gets burned into the final video *and* shipped as the upload subtitle, so errors here are the most visible kind — they're on screen for the whole video. After `cook dub burn` produces it, fan out a subagent with read access to `cloud-srt/zh.dub.srt` and ask it to check:
+**Quality gate — fan-out subagent review of the burned dub subtitles (mandatory, after `cook dub burn`).** What gets burned is the biliteral union of `zh.dub.srt` + `en.dub.srt`, and both ship as upload subtitles — errors here are the most visible kind, on screen for the whole video. After `cook dub burn` produces them, fan out a subagent with read access to `cloud-srt/zh.dub.srt` and `cloud-srt/en.dub.srt` and ask it to check:
 
 1. **Split words** — a single Chinese word or English term broken across two cues by `shorten`, so the viewer sees a fragment on its own (e.g. "数据" / "模型" split across cues when it should be one "数据模型" line). Each cue should read as a complete, self-contained thought.
-2. **Adjacent duplicates** — the same Chinese line (or near-duplicate) appearing in two consecutive cues. A regression here means a line plays twice on screen.
+2. **Adjacent duplicates** — the same line (or near-duplicate) appearing in two consecutive cues. **EN repetition is structural here**: a full-sentence EN cue spans several fragmented ZH cues, so the same English line on consecutive cues is the design (read the `[biliteral] timestamp-union` log line to confirm the union path). The defect is a cue whose ZH **and** EN are both verbatim identical to the previous cue's.
 3. **Missing cues** — gaps in the cue numbering, or cues with empty text. A dropped cue means a stretch of video with no subtitle at all.
 
 **Read every cue end-to-end; do not pattern-match against known-error shapes.** The `shorten`/`merge-short` transforms produce cues that look superficially similar (many start with the same particles), so regex-style scanning flags false positives and misses the real errors — a duplicate that differs by one character, a split that lands mid-clause rather than mid-word. The subagent's completion criterion: it has read every cue top to bottom and either confirms the file is clean or lists the specific cue numbers with their problem.
 
-This gate sits **after** `cook dub burn` (the merged subtitle only exists once burn runs it). Translation-content errors were already gated in Step 3; this gate catches the `shorten`/`merge-short` artifacts. If it finds any, fix `cloud-srt/zh.dub.srt` and the in-`dubbed/_full/` source, then re-run `cook dub burn`.
+This gate sits **after** `cook dub burn` (the merged subtitles only exist once burn runs it). Translation-content errors were already gated in Step 3; this gate catches the `shorten`/`merge-short`/union artifacts. If it finds any, fix `cloud-srt/zh.dub.srt` and the in-`dubbed/_full/` source, then re-run `cook dub burn`.
 
-Done when `cooked/<name>.dubbed.mp4` exists, duration matches the new timeline ±0.5s, a spot-check frame at a speaking timestamp shows Chinese subtitles rendered in the bottom bar, **and** the quality gate above has cleared.
+Done when `cooked/<name>.dubbed.mp4` exists, duration matches the new timeline ±0.5s, a spot-check frame at a speaking timestamp shows bilingual subtitles rendered in the bottom bar (EN above ZH), **and** the quality gate above has cleared.
 
 ### Step 8 — Verify
 

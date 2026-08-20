@@ -54,10 +54,12 @@ def _paths(output_root: str | Path, name: str) -> dict:
         "dub_wav": work / "dub.wav",
         "video_adjusted": work / "video_adjusted.mp4",
         "dubbing_srt": work / "dubbing.srt",
+        "dubbing_en_srt": work / "dubbing.en.srt",
         "dubbing_merged_srt": work / "dubbing.merged.srt",
         "burn_ass": work / "burn.ass",
         "final_mp4": root / "cooked" / f"{name}.dubbed.mp4",
         "cloud_srt": root / "cloud-srt" / "zh.dub.srt",
+        "cloud_srt_en": root / "cloud-srt" / "en.dub.srt",
     }
 
 
@@ -396,15 +398,12 @@ def stage_retime(output_root, name: str):
 
 # ===== Stage 4: concat + audio + subtitles + burn =====
 
-# Dub-specific subtitle style. The bilingual release from video-subtitle uses a
-# 180px bottom bar with font 64 — fine for two-language subtitles, but the dub
-# is single-language Chinese, so a shorter 70px bar with a smaller font (48) and
-# a low marginv (5) keeps the text tight against the bottom edge without wasting
-# screen space. These flags require upstream subtitles.py >= 181914d (ass
-# --fontsize/--marginv parameterization).
-_DUB_BAR = 70
-_DUB_FONT = 48
-_DUB_MARGINV = 5
+# The dub burns bilingual subtitles in the same bottom-bar layout as the
+# bilingual release from video-subtitle: EN (full sentences mapped onto the
+# dub's re-timed clock) over ZH (shorten/merge-short fragments). Font sizes
+# and margins are subtitles.py's bottom-bar defaults (ZH 64 / EN 44, marginv
+# 140) — no overrides here, so the two releases can't drift apart.
+_DUB_BAR = 220
 
 
 def stage_burn(output_root, name: str):
@@ -475,42 +474,64 @@ def stage_burn(output_root, name: str):
         assert audio_plan[i][2] >= audio_plan[i-1][3], f"overlap! cue{i} {audio_plan[i][2]} < {audio_plan[i-1][3]}"
     log(f"    ✓ {len(audio_plan)} cues, no overlap")
 
-    # 4c: generate SRT (pre-shorten, on the new timeline)
-    log("  4c: generate dubbing.srt")
+    # 4c: generate SRTs (pre-shorten, on the new timeline)
+    log("  4c: generate dubbing.srt + dubbing.en.srt")
     srt_lines = []
     for i, (_, _, cs, ce, text) in enumerate(audio_plan):
         srt_lines += [str(i+1), f"{fmt_ts(cs)} --> {fmt_ts(ce)}", text, ""]
     with open(p["dubbing_srt"], "w", encoding="utf-8") as f:
         f.write("\n".join(srt_lines))
 
-    # 4d: shorten + merge-short + ass (same pipeline as video-subtitle)
+    # EN side: full-sentence English (en.full.srt texts) placed on the
+    # re-timed clock. Cue idx i's window [new_start, new_end] is exactly where
+    # its Chinese audio plays, so the mapping is index-aligned by construction.
+    # This SRT feeds the biliteral merge in 4d and ships as cloud-srt/en.dub.srt.
+    en_texts = {}
+    with open(p["en_full_srt"], encoding="utf-8") as f:
+        for m in _CUE_RE.finditer(f.read()):
+            en_texts[int(m[1])] = re.sub(r"\s+", " ", m[4].strip())
+    n_cues = sum(1 for s in timeline if s["kind"] == "cue")
+    assert len(en_texts) == n_cues, \
+        f"en.full.srt has {len(en_texts)} cues but timeline has {n_cues} — regenerate timeline"
+    en_srt_lines = []
+    for seg in timeline:
+        if seg["kind"] != "cue":
+            continue
+        en_srt_lines += [str(seg["idx"]),
+                         f"{fmt_ts(seg['new_start'])} --> {fmt_ts(seg['new_end'])}",
+                         en_texts[seg["idx"]], ""]
+    with open(p["dubbing_en_srt"], "w", encoding="utf-8") as f:
+        f.write("\n".join(en_srt_lines))
+
+    # 4d: shorten + merge-short + biliteral + ass (same pipeline as video-subtitle)
     # shorten splits long cues into single-line cues, allocating sub-cue time
     # by display-width proportion (wlen). This keeps each cue one zh line.
-    log("  4d: shorten + merge-short + ass (via video-subtitle's subtitles.py)")
+    log("  4d: shorten + merge-short + biliteral + ass (via video-subtitle's subtitles.py)")
     subs_mod = _import_subtitles_module()
     short_srt = p["work"] / "dubbing.short.srt"
     merged_srt = p["dubbing_merged_srt"]
+    bilingual_srt = p["work"] / "dubbing.bilingual.srt"
     cooked_ass = p["work"] / "dubbing.cooked.ass"
     _run_subs(subs_mod, ["shorten", str(p["dubbing_srt"]), str(short_srt),
                          "--lang", "zh", "--max-zh", "56"])
     _run_subs(subs_mod, ["merge-short", str(short_srt), str(merged_srt),
                          "--min-dur", "1.2", "--max-len", "56", "--lang", "zh"])
-    _run_subs(subs_mod, ["ass", str(merged_srt), str(cooked_ass),
-                         "--fontsize", str(_DUB_FONT),
-                         "--marginv", str(_DUB_MARGINV),
+    # biliteral unions the full-sentence EN with the fragmented ZH. EN spans
+    # whole sentences while ZH breaks inside them, so EN repeats across the
+    # ZH fragments — the bilingual release's structural repetition with the
+    # languages' roles swapped. Flag with care in Gate C: EN repeating across
+    # consecutive cues is the design, not a defect.
+    _run_subs(subs_mod, ["biliteral", str(p["dubbing_en_srt"]),
+                         str(merged_srt), str(bilingual_srt)])
+    _run_subs(subs_mod, ["ass", str(bilingual_srt), str(cooked_ass),
                          "--bottom-bar", str(_DUB_BAR)])
+    shutil.copyfile(cooked_ass, p["burn_ass"])
 
-    # strip empty EN dialogues (dub is single-language Chinese)
-    with open(cooked_ass, encoding="utf-8") as f:
-        ass_lines = [l for l in f if not (l.startswith("Dialogue:") and ",EN,,0,0,0,," in l)]
-    burn_ass = p["burn_ass"]
-    with open(burn_ass, "w", encoding="utf-8") as f:
-        f.write("".join(ass_lines))
-
-    # 4e: copy upload subtitle to cloud-srt/
-    log("  4e: copy upload subtitle to cloud-srt/")
+    # 4e: copy upload subtitles to cloud-srt/
+    log("  4e: copy upload subtitles to cloud-srt/")
     p["cloud_srt"].parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(merged_srt, p["cloud_srt"])
+    shutil.copyfile(p["dubbing_en_srt"], p["cloud_srt_en"])
 
     # 4f: burn (run from work dir so ASS uses relative path — Windows ass filter rejects C: paths)
     log(f"  4f: burn (pad + ass, bottom-bar {_DUB_BAR})")
