@@ -139,7 +139,7 @@ Per-platform deliverable, written after the video is final (facts on screen are 
 - **xiaohongshu**: ≤20 chars, same professional tone, zero marketing language ("大佬带你", "效率翻倍").
 - **YouTube**: may carry "(双语字幕)" or the English title variant.
 
-The ~30s are style targets, not platform caps — the bilibili cap is far higher (historically 80). Verify the live cap when a title wants to run long; never assume the shorter.
+The ~30-char targets are style targets, not platform caps — the bilibili cap is far higher (historically 80). Verify the live cap when a title wants to run long; never assume the shorter.
 
 **Description — three versions:**
 
