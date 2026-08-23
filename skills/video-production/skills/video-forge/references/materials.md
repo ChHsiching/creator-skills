@@ -22,6 +22,14 @@ cook and whisperx live in ONE persistent shared Python environment — installed
 - Capture source metadata (author, title, URL, publish date) for attribution and later fact-checking.
 - Run a research subagent on the topic to collect verifiable facts, numbers, and proper-noun spellings BEFORE any text goes on screen. Anything the research cannot confirm from an authoritative source is UNVERIFIED — surface it to the user, never silently render it.
 
+## Screenshot capture (web pages as evidence frames)
+
+- **Zoom by narrowing the emulated viewport, not by page CSS zoom**: emulating 960×540 at DPR 4 reproduces 200% browser zoom at full 4K pixel count. Page-level CSS zoom overflows centered layouts — the capture lands on the top-left corner plus a scrollbar.
+- **Centered cards**: capture the full viewport, read the card's bounding box, crop from the capture.
+- **Crop the scrollbar strip** off the right edge — it appears at any zoom once the page scrolls.
+- **Place at natural aspect**: an image enters a card at full width and its own height. `objectFit: cover` zooms and crops silently — background use only, after the user has seen the crop.
+- Manual user-set browser zoom stays the fallback when the user wants specific framing.
+
 ## Gate mechanics (all gates)
 
 - **Round structure**: fresh subagent reads every cue end-to-end, checks every proper noun in context (web-searching anything it questions), reports numbered defects → router fixes each by hand → new fresh subagent reruns the FULL read. Repeat until a round reports zero. Spot-checking fixed lines is not a pass; the fix itself can introduce defects.
@@ -37,19 +45,22 @@ cook and whisperx live in ONE persistent shared Python environment — installed
 
 ## AI-flavor gate (all on-screen text)
 
-One dedicated pass over subtitles, cards, covers, and publish copy hunting:
+Runs as a multi-axis subagent loop: one axis per round, a fresh subagent doing the full read each time, repeated until a round reports zero — the loop guards both directions (an under-edited draft and an over-edited one). Two axes need no pattern list because they are generative judgments.
 
-- machine-compound words nobody says aloud (a coined "interrogation-meeting" style compound is the tell — replace with what a person would say)
-- translated-English constructions (inverted negation, "arrive at a term", adverb-fronted praise)
-- stock LLM phrasing, filler transitions, lists of exactly three
-- card text relying on auto-wrap — break lines at semantic units instead
-- vague quantifiers ("很多问题", "数十万") where the verified fact is a specific number — substituting the verified figure is part of this pass
+**Axis 1 — pattern defects (external skill, detect mode).** Load `no-ai-slop` (probed in Step 0) and run its detect mode over subtitles, cards, covers, and publish copy. Wrap the call for non-English copy: apply its editing principles and pattern sections, skip its English word lists, report findings in the working language. Each finding names the pattern, quotes the line, and gives a one-line fix. Fallback when the skill is missing — hunt locally: machine-compound words nobody says aloud; translated-English constructions (inverted negation, adverb-fronted praise); stock LLM phrasing, filler transitions, lists of exactly three; card text relying on auto-wrap (break at semantic units instead); vague quantifiers where the verified fact is a specific number ("很多问题", "数十万").
 
-Run it as its own fresh-subagent round with a keep-English glossary attached (so it flags real issues, not approved terms), then hand-fix line by line.
+**Axis 2 — generative criteria (register-level slop no pattern list catches).** Judge per line:
+- *Portability*: a line that would read unchanged in anyone's video about any product is filler — replace it with a fact, number, mechanism, or judgment specific to this subject.
+- *Specificity*: abstract praise ("significantly improves…") becomes the concrete figure from the verified facts list.
+- *Spoken-aloud test* (narration): narration is written to be read aloud; if a native speaker wouldn't say the line at that pace, it fails — whatever its language mix. The failure is sounding machine-generated, never the presence of any particular language.
+
+**Axis 3 — voice preservation (the over-editing brake).** Diff the draft against the previous round: fixes that sand off personality, humor, deliberate rhythm, or the author's phrasing are defects on this axis. The bar is "reads like a person", and generic-polished prose fails it.
+
+Hand-fix per finding and log What-changed (pattern → fix → flagging axis). Attach the keep-English glossary so approved terms survive axis 1.
 
 ## Fact verification checklist
 
-Every number, claim, name, and quote destined for the screen gets cross-checked against an authoritative source (official repo, primary article, the author's own docs). Verified facts carry their source; the rest are UNVERIFIED. Fast-moving numbers (stars, installs) change between recording and publish — when both values appear on screen, stamp each with its as-of date so the card can't read as a contradiction. The storyboard stage should only use the verified list.
+Every number, claim, name, and quote destined for the screen gets cross-checked against an authoritative source (official repo, primary article, the author's own docs). Verified facts carry their source; the rest are UNVERIFIED. Fast-moving numbers (stars, installs) change between recording and publish — when both values appear on screen, stamp each with its as-of date so the card can't read as a contradiction. Numbers read out of an image (screenshot text, OCR, vision-model reads) are UNVERIFIED until re-checked against a text source or API — vision models misread digits. The storyboard stage should only use the verified list.
 
 ## Images
 

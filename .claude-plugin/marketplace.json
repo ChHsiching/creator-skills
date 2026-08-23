@@ -15,7 +15,7 @@
         "./skills/video-subtitle",
         "./skills/video-dubbing"
       ],
-      "version": "2026.8.20"
+      "version": "2026.8.23"
     },
     {
       "name": "video-production",
@@ -26,7 +26,7 @@
         "./skills/tts-forge",
         "./skills/remotion-4k-polish"
       ],
-      "version": "2026.8.20"
+      "version": "2026.8.23"
     },
     {
       "name": "image-text-cards",
@@ -37,7 +37,7 @@
         "./skills/xhs-cards",
         "./skills/article-illustration"
       ],
-      "version": "2026.8.20"
+      "version": "2026.8.23"
     },
     {
       "name": "novel-promotion",
@@ -49,7 +49,7 @@
         "./skills/generate-source-video",
         "./skills/narrate-video"
       ],
-      "version": "2026.8.20"
+      "version": "2026.8.23"
     }
   ]
 }

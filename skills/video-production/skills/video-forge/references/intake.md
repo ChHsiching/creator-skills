@@ -15,7 +15,7 @@ Your scope-side categories:
 | 3 | Form | which visualization forms THIS material supports | derive from YOUR read of the material — what does IT suggest? |
 | 4 | Audience & wording red lines | beginner vs expert; terminology handling; density preference | "观众是小白，先人话后术语，禁缩词怪词" and/or "不要空白等待，任意 N 秒窗口至少一次视觉事件" — record density as a number if given |
 | 5 | Platform & specs | which platforms, resolution/fps | decides variants (bilibili triple card? xiaohongshu cover?) and render target |
-| 6 | Voiceover | only for silent material | route choice → API key → voice audition, hand to tts-forge |
+| 6 | Voiceover | only for silent material | route choice → API key → voice audition, hand to tts-forge; **timing authority** — the timeline follows measured TTS audio (default, "audio-first") or design-estimated frames |
 
 Two phrasing rules earned the hard way:
 
@@ -36,7 +36,7 @@ FORM       chosen visualization form + why the material supports it
 PLATFORMS  target platforms; resolution/fps; required variants (e.g. bili triple card)
 FACTS      verified key numbers/claims for on-screen use; UNVERIFIED list if any
 ASSETS     speaker avatars/photos, source images, logo — what exists, what's cleared
-AUDIO      original track / TTS plan (tts-forge output) / none
+AUDIO      original track / TTS plan (tts-forge output) / none — for TTS, the timing authority settled at intake (audio-first default or design-first)
 ```
 
 The brief pre-answers the director's Phase 1 discovery (its Step 1) — say so when handing off. The director still runs its own Creative Direction, Reference, and Creative Brief steps (shape), which consume the brief and flow into Phase 2.
