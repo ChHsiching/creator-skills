@@ -36,7 +36,7 @@ from indextts.infer_v2 import IndexTTS2
 
 **Order matters**: the env vars must be set before any numerical library imports. Setting them after torch loads has no effect. Every script in `scripts/` does this at the top.
 
-Cost: RTF jumps from ~5 (multi-thread, broken) to ~30-36 (single-thread, correct). A 141-cue video takes ~7 hours on a Ryzen CPU. This is unavoidable — there is no "fast and correct" mode.
+Cost: RTF jumps from ~5 (multi-thread, broken) to ~30-36 (single-thread, correct). A 141-cue video takes ~8 hours on a Ryzen CPU (~3.5 min per cue — see SKILL.md Step 4 for the per-cue cost model). This is unavoidable — there is no "fast and correct" mode.
 
 ### Install
 
@@ -110,7 +110,7 @@ ratio = chinese_TTS_duration / english_window_duration
 - `ratio > 1`: Chinese is longer. The video segment gets **slowed down** (stretched) to match.
 - `ratio ≈ 1`: no change.
 
-The Chinese audio is **never** atempo-stretched. Every cue plays at its natural TTS speed.
+Normal-rate audio is **never** time-stretched or atempo'd — every cue plays at its natural TTS speed, and length mismatches are absorbed on the video side. Slow cues (the short-line pacing bug) are fixed per SKILL.md Step 4's speed-up ladder — the ladder's last rung is DSP `atempo` capped at 1.6x per cue, under the pacing policy, not a contradiction of it.
 
 ### The string-of-pearls timeline (overlap-proof)
 
@@ -132,12 +132,29 @@ The old approach (VoxCPM2 + atempo) stretched the audio to fit the window. Probl
 Re-timing the video instead:
 - 1.2x video speedup is invisible on talking-head footage (viewers don't notice frame-dropping at 60fps source).
 - 0.7x video slowdown is acceptable (the speaker moves a bit slower; with minterpolation it's smooth).
-- No audio artifacts ever — the TTS output is sacred.
+- Normal-rate audio stays untouched end to end — the only audio processing the pipeline ever does is the pacing policy's bounded per-cue speed-up of confirmed-slow cues.
 - The only limit is how much speedup viewers tolerate before the picture looks fast-forwarded (>1.5x is the threshold).
 
 ### Expected duration change
 
 A faithful Chinese translation is typically 10-30% longer or shorter than the English, depending on the content. Technical talks (lots of English terms retained) tend to run shorter (Chinese grammar is more compact). Storytelling content runs longer (Chinese needs more syllables for the same meaning). The re-timed video will be 10-30% off the original duration — this is expected and acceptable.
+
+### timeline.json — schema
+
+`dubbed/_full/timeline.json` is the plan every later stage (retime, burn, subtitles, adjuster) consumes. Top level: `{"timeline": [segments], "total_new": float, "raw_dur": float, "adjust": {...} (written by adjust_timeline.py)}`. Segment fields:
+
+| field | kind | meaning |
+|---|---|---|
+| `kind` | cue/gap | `cue` = a spoken sentence (audio + video); `gap` = pause between cues (video only) |
+| `idx` | cue | cue number — indexes `sent_<idx:04d>.wav`, translations_dub.txt line, en.full.srt cue |
+| `orig_start`, `orig_end` | both | the segment's window on the RAW video clock |
+| `zh_dur` | cue | the synthesized audio's exact duration (seconds) |
+| `text` | cue | the ZH sentence (same as translations_dub line `idx`) |
+| `en` | cue | the EN full sentence |
+| `new_start`, `new_end`, `new_dur` | both | the segment's window on the re-timed clock; segments tile back-to-back (next.new_start == prev.new_end) |
+| `speed` | both | orig_dur / new_dur playback rate (0.45x = slowed, 1.2x = sped up); gaps carry it too (1.0 unless an adjuster stretched them) |
+
+Invariants to respect when writing tools that edit this file: segments tile contiguously; starts strictly monotonic; a cue's audio (`zh_dur` from its `new_start`) never overlaps the next cue's audio.
 
 ## minterpolate — parameter tuning and alternatives
 
@@ -166,7 +183,7 @@ Do **not** try `mc_mode=obmc` (lower quality than aobmc) or `vsbmc=0` (worse) th
 
 ### Cost
 
-Interpolated segments run at RTF ~23 on CPU. A typical 11-min video has ~90 slowed segments totaling ~7 min of output video — that's ~2.8 hours of processing. Combined with TTS (~7h), the full pipeline is ~10 hours on CPU. GPU (if available) cuts minterpolate to minutes but doesn't help IndexTTS2 (which is CPU-bound by the single-thread constraint).
+Interpolated segments run at RTF ~23 on CPU. A typical 11-min video has ~90 slowed segments totaling ~7 min of output video — that's ~2.8 hours of processing. Combined with TTS (~8h at 141 cues), the full pipeline is ~11 hours on CPU. GPU (if available) cuts minterpolate to minutes but doesn't help IndexTTS2 (which is CPU-bound by the single-thread constraint).
 
 ## Demucs — raw commands (fallback when `cook dub separate` is missing)
 
@@ -196,7 +213,7 @@ After burning, listen for these failure modes:
 
 - **洋腔 (foreign accent)** — the Chinese sounds like a non-native speaker. If severe, the reference audio was too English-heavy; try a different reference clip or switch engines. IndexTTS2 should have almost none.
 - **Term-translation mismatch** — the dub says "快照" but the screen shows "snapshot." This means a clause-2 term (on-screen content) was wrongly translated. Audit the term list against the video.
-- **Audio gaps** — silence where there should be speech. A cue failed to synthesize (check `_segments/` for < 1KB files) or the timeline placement is wrong (check `timeline.json` for `new_start > new_end`).
+- **Audio gaps** — silence where there should be speech. A cue failed to synthesize (check `dubbed/_full/_segments/` for < 1KB files) or the timeline placement is wrong (check `timeline.json` for `new_start > new_end`).
 - **Subtitle overflow** — text clipped at screen edges. The `shorten --max-zh` is too high for the font size; re-run shorten with a lower limit (try 36, then 30).
 
 ## Fallback: 豆包 voice-clone 2.0 API

@@ -6,7 +6,7 @@ Loaded on demand from [SKILL.md](SKILL.md). The main skill file is the pipeline 
 
 The download step used to be three steps of hand-assembled yt-dlp commands. Three bugs recurred:
 
-1. **stdout redirect swallowed downloads** — `yt-dlp ... --dump-json > file.json` redirected both the JSON and yt-dlp's progress/trigger output, sometimes resulting in exit 0 with no mp4 written. cook uses `--print-to_file` (yt-dlp's native JSON-to-file option).
+1. **stdout redirect swallowed downloads** — `yt-dlp ... --dump-json > file.json` redirected both the JSON and yt-dlp's progress/trigger output, sometimes resulting in exit 0 with no mp4 written. cook avoids both this and yt-dlp's `print_to_file` (which broke on newer versions, silently writing a 3-byte "NA") by writing `source.json` itself from the probe result.
 2. **Thumbnail misnamed** — yt-dlp's `-o "<name>.raw.%(ext)s"` template leaves the `.raw` infix in the thumbnail name too, producing `<name>.raw.jpg` instead of the documented `<name>.jpg`. The old skill doc claimed `--convert-thumbnails jpg` would fix this; it doesn't (it only changes the extension). cook renames it.
 3. **Cookie negotiation hand-driven** — the agent had to detect browsers, try each, manage the Chromium database lock, copy to temp dirs, and never confuse "wrong browser" with "broken cookies". cook drives this internally.
 
@@ -63,22 +63,23 @@ yt-dlp --js-runtimes node --remote-components ejs:github -F "<URL>"
 ```
 `-F` lists formats without downloading. `--js-runtimes node --remote-components ejs:github` solves the n-challenge on sites that use one (YouTube especially); harmless elsewhere. Evaluate: real video/audio formats in the table → cookies not needed; "Sign in to confirm you're not a bot" → cookie negotiation.
 
-### Download (Step 1 internally)
+### Download (manual equivalent of cook's Step 1)
 ```
 yt-dlp --js-runtimes node --remote-components ejs:github \
   [--cookies-from-browser "<source>"] \
-  -f "bestvideo+bestaudio" --merge-output-format mp4 \
+  -f "bestvideo+bestaudio/best" --merge-output-format mp4 \
   --write-thumbnail --convert-thumbnails jpg \
   --print-to-file "%(all)j" "<output-root>/raw/<name>.source.json" \
   -o "<output-root>/raw/<name>.raw.%(ext)s" \
   "<URL>"
 ```
+(The `--print-to-file` line is the manual way to capture metadata — see the flag note below; cook itself writes `source.json` from its probe result instead.)
 
 Flag notes:
-- `-f "bestvideo+bestaudio"` picks the highest-resolution video and highest-bitrate audio streams separately; `--merge-output-format mp4` muxes them. Sites that serve video and audio as separate adaptive streams above 720p (YouTube, others) require this to get 1080p+ with sound. Falls back to best muxed format automatically if the site only offers muxed streams.
-- For quality cap: replace with `-f "bv*[height<=1080]+ba/b[height<=1080]"` (cook's `--quality 1080` does this).
+- `-f "bestvideo+bestaudio/best"` picks the highest-resolution video and highest-bitrate audio streams separately; `--merge-output-format mp4` muxes them. Sites that serve video and audio as separate adaptive streams above 720p (YouTube, others) require this to get 1080p+ with sound. The trailing `/best` is the muxed fallback — without it, HLS-only sources (incl. YouTube's auto-dubbed multi-audio delivery) die with "Requested format is not available".
+- For quality cap: replace with `-f "bv*[height<=1080]+ba/b[height<=1080]/b"` (cook's `--quality 1080` does this).
 - `--write-thumbnail --convert-thumbnails jpg` writes the best-scored thumbnail normalized to jpg.
-- `--print-to-file` takes **two separate arguments**: a template (`%(all)j` = the full info-dict as JSON) and a target path. This is the **safe** alternative to `--dump-json > file.json` (which can swallow the download via stdout redirect). cook uses the Python API equivalent (`print_to_file` option with a dict `{template: path}`) so the syntax here is the CLI form for manual use.
+- `--print-to-file` takes **two separate arguments**: a template (`%(all)j` = the full info-dict as JSON) and a target path. A safe **manual** alternative to `--dump-json > file.json` (which can swallow the download via stdout redirect) — but fragile across yt-dlp versions (it has written a 3-byte "NA"); cook instead writes `source.json` itself from the probe result.
 - `-o "<output-root>/raw/<name>.raw.%(ext)s"` — the literal `.raw` infix is intentional for the video (lands as `<name>.raw.mp4`), but it also affects the thumbnail (lands as `<name>.raw.jpg`). cook renames the thumbnail to `<name>.jpg` after download.
 
 ### Verify (Step 1 internally)
@@ -122,7 +123,7 @@ Required for merging video + audio streams. Run `ffmpeg -version`; if missing, t
 
 The source JSON and the thumbnail are degraded-completion artifacts:
 - Some sources have no thumbnail at all.
-- A transient `--dump-json` / `--print-to-file` failure shouldn't block the download.
+- A transient metadata-probe failure shouldn't block the download.
 
 If either is missing, tell the user explicitly:
 - **No thumbnail**: they'll need a frame-grab cover later (`ffmpeg -ss <time> -i <mp4> -frames:v 1 cover.jpg`). `video-subtitle` Step 6's `cook cover` handles this.
