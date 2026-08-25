@@ -1,94 +1,89 @@
 ---
 name: xhs-cards
-description: "Turn any link, file, or pasted text into a set of 3:4 Xiaohongshu (小红书) image cards, each rendered to a 3x PNG. Use when the user wants 小红书图文/卡片组/竖屏图文笔记, asks to turn an article/changelog/update into shareable image pages, or mentions xhs-cards/小红书卡片."
+description: "Turn any link, file, or pasted text into a set of 3:4 Xiaohongshu (小红书) image cards, each rendered to a 3x PNG, plus the caption. Use when the user wants 小红书图文/卡片组/竖屏图文笔记, asks to turn an article/changelog/update into shareable image pages, or mentions xhs-cards/小红书卡片."
 ---
 
 # xhs-cards
 
-A **router** over [`beautiful-article`](../beautiful-article/SKILL.md): beautiful-article owns source extraction, editorial planning, theme system, and scaffold. This skill takes over at the card layer — reshaping the article into a deck of 3:4 cards, rendering each to a 3x PNG, and writing the caption.
+Turn source material into a deck of N standalone 3:4 cards (1080×1440 CSS canvas → 3240×4320 PNG), designed freely inside the card framework on a reacticle theme, plus a Xiaohongshu caption. Standalone: no other skill's pipeline is invoked. The user reviews **once**, at the end, on the complete deck.
+
+**Dependencies** (assumed installed): `no-ai-slop` skill (copy review, Step 6); npm + Node 18+ (reacticle workspace); `playwright-core` with a chromium (render + audit); Python PIL (pixel audits).
 
 ## What you produce
 
-1. `exports/NN.png` — the cards, each 3240×4320 (3x of 1080×1440)
-2. `caption.md` — Xiaohongshu titles, body, pinned comment, chapter list, hashtags, sources
-3. `source/source.md` + `plan/plan.md` — from beautiful-article Phases 1–2
-4. `article/` — the React + reacticle workspace (Deck + Card + cards/NN-*.tsx)
+1. `exports/NN.png` — the cards, 3240×4320 each
+2. `caption.md` — titles, body, pinned comment, chapters, hashtags, sources
+3. `source/source.md`, `plan/plan.md`, `article/` (React + reacticle deck workspace)
 
-## The pipeline
+## Pipeline
 
-### Step 1–3 — Run beautiful-article's editorial process
+### Step 1 — Source, chased until sufficient
 
-Follow beautiful-article's SKILL.md for Phase 0 through Phase 3 Checkpoint 1 — source extraction, editorial plan, and the five-decision Checkpoint 1. This skill only changes two things in those phases:
+Create the run dir; every path below (`source/`, `plan/`, `article/`, …) lives inside it. Extract the material into `source/source.md`. Web inputs: fetch with the environment's page-fetch tool first; on 404 or empty (JS-rendered pages) retry with a rendering fetcher. Files/paste: convert directly.
 
-- **Phase 0–1, URL inputs**: try WebFetch first; on 404 (JS-rendered sites), fall back to `mcp__chhsich-web-fetch__fetch` with `return_format: markdown`.
-- **Phase 2, Outline**: the plan is a **card list** (N cards, each with its core idea + visual technique), flowing as a deck rather than article sections.
-- **Phase 3, Checkpoint 1**: the five decisions stay independent, but two take card-deck-specific options — card count (condensed 8 / medium 11 / full 14, recommend by information volume) and theme (warm themes suit Xiaohongshu: andy, freddie, sottsass).
+**Sufficiency rule**: links inside the source (repos, gists, docs, APIs) are part of the fact base — fetch and verify each one that the deck will make claims about, and cross-check the source's own claims against them. Write uncertain items to `source/extraction-notes.md`. If target language ≠ source language, produce a natural translation as the fact base.
 
-**Done when** Checkpoint 1 passes (all decisions confirmed by the user).
+**Done when** every number, name, command, and quote that will appear on a card traces to source.md or a chased link — not to memory.
 
-### Step 4 — Scaffold, then reshape into a card deck
+### Step 2 — Plan the deck, then Checkpoint 1
 
-Run `beautiful-article/scripts/scaffold.sh <dir> --theme=<id>`. Then make the structural cut that defines this skill: delete the flowing-article scaffold (`article/Article.tsx`, `article/Cover.tsx`, `article/sections/`) and replace it with a card deck — rewrite `main.tsx` to a `<Deck/>`, create `Card.tsx` (shared shell), `cards/_shared.tsx` (shared typography + Icon), and one file per card (`cards/NN-*.tsx`).
+Write `plan/plan.md`: Brief (audience, tone, key claims, target language) + card list (each card: core idea + visual approach) + theme pick + assets policy. Read [`references/themes.md`](references/themes.md) before choosing a theme.
 
-Read [`references/card-anatomy.md`](references/card-anatomy.md) for the Card shell spec, the shared typography component, the Icon system, and the visual-technique repertoire — all verified in production. The templates in [`assets/`](../assets/) encode the same specs as ready-to-copy files.
+Self-check the plan, then stop and collect user decisions independently (the environment's question/confirmation tool, one question each; recommend, never silently choose):
 
-**Done when** the workspace typechecks and renders the first three cards (cover + overview + one representative) without error.
+1. **Card count** — 8 condensed / 11 medium / 14 full, by information volume
+2. **Theme** — recommendation must argue **content fit first** (how the theme's character maps to this material); engineering convenience may appear only as a second, labeled reason
+3. **Density** — how much source detail to keep (~50% briefing / ~90% tutorial-style)
 
-### Step 5 — First Spread, then Checkpoint 2
+**Done when** the user has answered every question. Plan-rules: no card may reference content a later card reveals (forward references), and no card may preview a later card's payoff — narrative order is part of the plan check. Also write `plan/names.txt` — every proper noun that must never wrap across lines (product/repo/command names), one per line, **empty file if none**: verify.mjs fails when the file is missing, because the split-name audit silently no-ops without it.
 
-Build cover + overview + one representative card. Screenshot them into `preview/` (a subdirectory — keep all output inside the card workspace). Hand to a First Spread Reviewer subagent. Run Checkpoint 2 (acceptance + development mode A/B) — two independent questions.
+### Step 3 — Scaffold the deck
 
-The first spread is the quality gate. The user will notice three things first: font size (readable in a ~300px feed thumbnail), cover design (a card worth opening), copy (natural, the way a colleague would say it). Read [`references/pitfalls.md`](references/pitfalls.md) before this step — its eight failure modes were all surfaced and fixed in production, and the first spread is where most of them show up.
+```bash
+bash <skill>/scripts/scaffold-deck.sh <run-dir> --theme=<id>
+```
 
-**Done when** the user accepts the first spread and picks a development mode.
+Creates a Vite + React + TS workspace born deck-shaped: `article/` holds `Deck.tsx`, `Card.tsx`, `cards/_shared.tsx`, one file per card; `index.html` already loads the theme's fonts; memory dirs `source/ plan/ preview/ exports/` created (the run dir may already hold `source/`/`plan/` from Steps 1–2 — the scaffold allows that and only refuses an already-scaffolded workspace). Verify with `npm run typecheck && npm run build`.
 
-### Step 6 — Build all cards
+**Done when** the empty workspace typechecks and builds.
 
-Write every card. Each has a title, a lead, a visual block (the idea shown, told only as backup), and a Takeaway (one line at the bottom). Every card earns a visual technique — flow diagram, compare panel, mapping row, stat pill, process chain — chosen to serve that card's core idea. The verified repertoire is in [`references/card-anatomy.md`](references/card-anatomy.md).
+### Step 4 — Design all cards, freely inside the framework
 
-**Visual weight is the core quality standard.** A 3:4 card is a fixed 1440px canvas. Content fills it by density: two failure modes both make the card look broken — content piled in the top half leaving a void below, or elements forced apart with large gaps to fake fullness. The fix for either is adding visual blocks or restructuring the distribution; [`references/pitfalls.md`](references/pitfalls.md) pitfall 8 has the concrete techniques verified this run (split-screen cover, layer cards, enlarged anchor text, expanded lists).
+Read [`references/card-anatomy.md`](references/card-anatomy.md) (canvas contract, font floors, anchors) and [`references/typography.md`](references/typography.md) (line-break discipline) before writing, and again whenever layout questions come up.
 
-**Done when** every card exists and the deck typechecks — Step 7 then verifies the layout.
+The design stance: the framework (canvas, floors, anchors, audit hooks) is fixed; **everything visual is designed fresh for this material** — layouts, typography pairings, decorative language come from the theme's character and the content. `assets/samples/` holds finished-deck samples for inspiration only ([`references/card-anatomy.md`](references/card-anatomy.md) states the stance in full).
 
-### Step 7 — Layout verification (both directions)
+Screenshots embedded in cards: the screenshot's aspect ratio is fixed by its content — fit the layout to the screenshot (position/size only), and if it cannot fit legibly, give it its own page with page furniture dropped. Crop at element boundaries, mid-element cuts are defects.
 
-A card fails two ways: overflow (content spills past the footer) and void (content occupies only the top half). Check both, on every card.
+**Done when** every planned card exists, the deck typechecks and builds.
 
-Use Playwright `evaluate` to measure each card's Takeaway bottom against its footer top — the overflow detector finds the Takeaway by its theme-accent background color (read the RGB from the theme's CSS in `node_modules/reacticle/`). Screenshot every card to read its visual weight — if hiding the Takeaway mentally leaves an obvious empty lower half, the card has a void. The exact scripts are in [`references/export.md`](references/export.md).
+### Step 5 — Self-audit loop (no user time spent)
 
-Fix overflow by compressing layout — the verified techniques are in [`references/pitfalls.md`](references/pitfalls.md) pitfall 5. Fix a void by adding a visual block or restructuring the distribution — pitfall 8 has the verified fill techniques.
+Run `node <skill>/scripts/verify.mjs <run-dir>` — the atomic audit (typecheck → build → DOM + pixel checks; the full audit table lives in [`references/export.md`](references/export.md)). Fix, re-run, until the report is all-pass.
 
-**Done when** every card passes: the overflow gap is positive on all N cards, and the screenshots show no voids.
+**Done when** verify reports zero failures.
 
-### Step 8 — Render to 3x PNG
+### Step 6 — Two review loops, then final review
 
-Build the single-file HTML (`npm run build`), then render each card via Playwright at `deviceScaleFactor: 3` — CSS canvas 1080×1440 becomes PNG 3240×4320. Use the standalone render script (Playwright via `playwright-core`, which lets you set the device scale factor; the MCP browser cannot change its scale after launch). Verify every PNG's four corners are opaque (alpha 255) — square corners. Read [`references/export.md`](references/export.md) for the render script and the corner-verification script.
+- **Typography loop** (rules: [`references/typography.md`](references/typography.md)): a subagent reviews all cards' rendered text — semantic line breaks, orphan lines, split names, mono/ASCII mixing, ink fill — returns fail items, you fix, re-review, until clean.
+- **Copy loop** (dependency: `no-ai-slop`): a subagent runs no-ai-slop **detect** on all card copy + caption drafts, names patterns with quoted lines; you fix, re-detect, until clean.
 
-**Done when** every card is a clean 3240×4320 PNG with square corners, in `exports/`.
+Then a final-review subagent over the whole deck: editorial (facts vs source.md, verbatim quotes), visual (theme discipline, weight), technical (anchors, build), **audience (cold reader: title/comprehensible without context; no jargon only a deck-reader knows)**. Fix everything it flags, re-verify.
 
-### Step 9 — Caption
+**Done when** both loops report clean and final review flags are fixed and re-audited.
 
-Write `caption.md` following [`references/caption-spec.md`](references/caption-spec.md) — Xiaohongshu titles (≤20 chars), body (≤100 chars), pinned comment (≤300 chars including spaces and punctuation), chapter list (two versions), hashtags, sources. Verify every character count with `len()` before delivery. Write in a professional tone.
+### Step 7 — Render and caption
 
-**Done when** caption.md exists with all character counts verified.
+`node <skill>/scripts/export-png.mjs <run-dir>` renders every card at 3x (card count auto-detected). Write `caption.md` per [`references/caption-spec.md`](references/caption-spec.md) — every count and the cold-reader title test live there; the caption text also goes through the no-ai-slop detect pass (same loop as Step 6). Re-run verify after export (it checks dimensions and corners).
 
-### Step 10 — Final review and delivery
+**Done when** exports/ holds N 3240×4320 PNGs with opaque corners, and every caption field passes its spec check.
 
-Run a Final Reviewer subagent across all cards (editorial / visual / technical). Fix what it flags, then run Checkpoint 3 (delivery confirmation) — an independent question.
+### Step 8 — One consolidated review
 
-**Done when** the user confirms delivery.
+Present the complete deck to the user: preview paths (`preview/` holds only canonical `NN.png` — the hygiene rule lives in [`references/export.md`](references/export.md)), caption, verification summary. User feedback rounds: **confirm your understanding of the request and the exact operations before touching files**; change only what the user named, list adjacent observations as suggestions for them to decide.
 
-## References
+**Done when** the user accepts.
 
-| File | Read when |
-|---|---|
-| [`references/card-anatomy.md`](references/card-anatomy.md) | Step 4 (building the deck) and Step 6 (choosing visual techniques) — Card shell, shared typography, Icon, visual repertoire |
-| [`references/pitfalls.md`](references/pitfalls.md) | Before Step 5 (first spread) and Step 7 (layout verification) — the eight verified failure modes and their fixes |
-| [`references/export.md`](references/export.md) | Step 7 (layout measurement scripts) and Step 8 (render + corner verification) |
-| [`references/caption-spec.md`](references/caption-spec.md) | Step 9 — caption structure and character limits |
+## Failure modes
 
-The templates in [`assets/`](assets/) (`Card.template.tsx`, `shared.template.tsx`, `Deck.template.tsx`) and the render script in [`scripts/`](scripts/) encode the same specs as copy-ready files.
-
-## Writing standard
-
-Write the card copy the way a specific, opinionated human editor would explain it — natural Chinese (or the target language), command names and file names in English. [`references/pitfalls.md`](references/pitfalls.md) pitfall 2 lists the coined terms the first translationese draft produced, and the natural-language rewrites that replaced them.
+[`references/pitfalls.md`](references/pitfalls.md) — the recurring defects (voids, footer overlap, emoji icons, translationese, scattered outputs) with the verified fix for each. Read before Step 4 and whenever verify fails.

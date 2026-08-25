@@ -1,9 +1,7 @@
-// shared.template.tsx — copy to article/cards/_shared.tsx.
-// Font sizes are the floor (pitfall 3). Icon is SVG, never emoji (pitfall 1).
-// See references/card-anatomy.md.
+// andy-shared.sample.tsx — SAMPLE from a finished andy-theme deck.
+// Reference only (see the header note in andy-Card.sample.tsx).
 import type { CSSProperties, ReactNode } from "react";
 
-// ── Icon · SVG line icons (Feather-like). Never emoji. ──
 const ICON_PATHS: Record<string, ReactNode> = {
   plug: (<><path d="M9 7V3M15 7V3M7 7h10v5a5 5 0 0 1-10 0V7zM12 17v4" /></>),
   puzzle: (<><path d="M8 4h3a1 1 0 0 1 1 1 1.5 1.5 0 0 0 3 0 1 1 0 0 1 1-1h3v3a1 1 0 0 0 0 2v3a1 1 0 0 1-1 1h-3a1.5 1.5 0 0 0-3 0 1 1 0 0 1-1 1H8v-4a1.5 1.5 0 0 0-2 0 1 1 0 0 1-1 1V4z" /></>),
@@ -46,28 +44,9 @@ export function Body({ children, style }: { children: ReactNode; style?: CSSProp
 }
 export function Takeaway({ children, icon = "bulb" }: { children: ReactNode; icon?: string }) {
   return (
-    <div style={{ marginTop: "auto", padding: "26px 32px", borderRadius: "var(--ra-radius-lg)", background: "var(--hs-orange)", color: "var(--ra-color-heading)", fontFamily: "var(--ra-font-heading)", fontSize: "28px", fontWeight: 700, lineHeight: 1.4, boxShadow: "var(--ra-shadow-md)", display: "flex", alignItems: "center", gap: "18px" }}>
+    <div data-takeaway="true" style={{ marginTop: "auto", padding: "26px 32px", borderRadius: "var(--ra-radius-lg)", background: "var(--hs-orange)", color: "var(--ra-color-heading)", fontFamily: "var(--ra-font-heading)", fontSize: "28px", fontWeight: 700, lineHeight: 1.4, boxShadow: "var(--ra-shadow-md)", display: "flex", alignItems: "center", gap: "18px" }}>
       <Icon name={icon} size={34} />
       <span>{children}</span>
-    </div>
-  );
-}
-export function Code({ children }: { children: ReactNode }) {
-  return <code style={{ fontFamily: "var(--ra-font-mono)", fontSize: "0.86em", background: "var(--ra-color-surface-2)", color: "var(--ra-color-accent-strong)", padding: "3px 12px", borderRadius: "var(--ra-radius-sm)", fontWeight: 600 }}>{children}</code>;
-}
-export function SoftRow({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: "20px", padding: "20px 26px", borderRadius: "var(--ra-radius-md)", background: "var(--ra-color-surface)", boxShadow: "var(--ra-shadow-sm)" }}>
-      <span style={{ fontFamily: "var(--ra-font-heading)", fontSize: "26px", fontWeight: 700, color: "var(--ra-color-accent-strong)", whiteSpace: "nowrap", minWidth: "fit-content" }}>{label}</span>
-      <span style={{ fontFamily: "var(--ra-font-body)", fontSize: "26px", color: "var(--ra-color-text)", lineHeight: 1.4 }}>{children}</span>
-    </div>
-  );
-}
-export function BlockLabel({ children }: { children: ReactNode }) {
-  return (
-    <div style={{ fontFamily: "var(--ra-font-heading)", fontSize: "26px", fontWeight: 700, color: "var(--ra-color-muted)", letterSpacing: "0.04em", margin: "10px 0 14px 0", display: "flex", alignItems: "center", gap: "14px" }}>
-      <span style={{ width: "32px", height: "5px", borderRadius: "999px", background: "var(--hs-orange)", display: "inline-block" }} />
-      {children}
     </div>
   );
 }

@@ -1,5 +1,7 @@
-// Card.template.tsx — copy to article/Card.tsx, replace <THEME-ACCENT-RGB> and brand text.
-// Verified in production (andy theme, 14 cards). See references/card-anatomy.md.
+// andy-Card.sample.tsx — SAMPLE from a finished andy-theme deck (14 cards, production).
+// Reference only: read for how a shell implements the canvas contract + anchors,
+// then design your own shell for your theme. Not a copy-paste starting point.
+// Note: --hs-orange / --hs-orange-soft are andy-local tokens (see references/themes.md).
 import type { ReactNode } from "react";
 
 type CardProps = {
@@ -23,7 +25,7 @@ export function Card({ index, category, children, variant = "default" }: CardPro
         background: "linear-gradient(160deg, var(--ra-color-bg) 0%, var(--ra-color-bg-tint) 100%)",
         color: "var(--ra-color-text)",
         fontFamily: "var(--ra-font-body)",
-        borderRadius: "0",            // PNG must be square (pitfall 4)
+        borderRadius: "0",
         margin: "0 auto 32px auto",
         boxShadow: "var(--ra-shadow-lg)",
         isolation: "isolate",
@@ -43,7 +45,7 @@ export function Card({ index, category, children, variant = "default" }: CardPro
       <div style={{
         position: "absolute", inset: 0,
         paddingTop: isCover ? "0" : "120px",
-        paddingBottom: isCover ? "0" : "104px",   // footer clearance (pitfall 5)
+        paddingBottom: isCover ? "0" : "104px",
         paddingLeft: isCover ? "0" : "72px",
         paddingRight: isCover ? "0" : "72px",
         display: "flex", flexDirection: "column", zIndex: 1,
@@ -52,7 +54,7 @@ export function Card({ index, category, children, variant = "default" }: CardPro
       </div>
 
       {!isCover && (
-        <footer style={{
+        <footer data-footer="true" style={{
           position: "absolute", bottom: 0, left: 0, right: 0,
           display: "flex", alignItems: "center", justifyContent: "space-between",
           padding: "0 64px 36px 64px",
@@ -64,8 +66,7 @@ export function Card({ index, category, children, variant = "default" }: CardPro
         </footer>
       )}
 
-      {/* Decorative dot — andy imperfect-circle motif. Intentionally overflows (clipped). */}
-      <span aria-hidden="true" style={{
+      <span data-decor="true" aria-hidden="true" style={{
         position: "absolute", right: "-60px", bottom: "-60px",
         width: "180px", height: "180px", borderRadius: "999px",
         background: "var(--hs-orange)", opacity: 0.08, zIndex: 0, pointerEvents: "none",

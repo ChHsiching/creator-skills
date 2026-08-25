@@ -1,87 +1,43 @@
-# Pitfalls — eight verified failure modes
+# Pitfalls — verified failure modes
 
-Each pitfall here was hit and fixed in production (the mattpocock/skills v1.2 deck). They are written as the concrete fix the run verified, with the real symptom that surfaced — so the next run applies the fix, not a re-invention. Read this file before Step 5 (building cards) and again before Step 7 (layout verification).
+Each entry is a defect hit in production, with the fix the run verified. Read before Step 4 and whenever `verify.mjs` reports failures. Line-break defects live in [`typography.md`](typography.md); screenshot rules in [`card-anatomy.md`](card-anatomy.md).
 
-## Pitfall 1 — Emoji as icons
+## 1 — Emoji as icons
 
-**Symptom**: the user said "太丑了" (too ugly). Emoji renders inconsistently across OSes and clashes with the theme palette.
+Emoji renders inconsistently across OSes and clashes with the palette. **Fix**: hand-authored SVG line icons (`stroke=currentColor`, 24×24, round caps). Grep card files for emoji ranges before review.
 
-**Fix (verified)**: an Icon component — hand-authored SVG line icons, `stroke=currentColor`, 24×24 viewBox, round line caps. The Takeaway `icon` prop takes a string name (`plug`, `target`, …), never an emoji character. See [`card-anatomy.md`](card-anatomy.md) "Icon" for the component spec and the verified icon set.
+## 2 — Translationese
 
-**Check**: grep the card files for emoji ranges; the set should be empty.
+Word-by-word translation reads as coined, unnatural phrasing ("重新 pitch", "一手来源"). **Fix**: rewrite in natural target language from the translated fact base; keep commands, file names, product names in English. Read each line aloud — "would a native colleague say this?"
 
-## Pitfall 2 — Translationese and coined terms
+## 3 — Font sizes below the floor
 
-**Symptom**: the user said "翻译的措辞很奇怪，各种自造词，不像正常人说话" (weird phrasing, coined terms, doesn't sound like a normal person).
+Feed thumbnails are ~300px wide; text below the floors is illegible there. The authoritative floor table lives in [`card-anatomy.md`](card-anatomy.md) — check sizes against it, not against memory.
 
-This happens when the source is English and you translate word-by-word instead of rewriting in natural Chinese. The first draft of the source produced these — none of them are words a Chinese developer would actually say:
+## 4 — Rounded container corners
 
-> 重新 pitch · ubiquitous language · 啃字 (clip words) · 听者状态 (listener's state) · 机制即名字 (the mechanism is the name) · 一手来源 (primary source) · AFK · frontier · charting · over-reaching
+The shell's `borderRadius` exports transparent PNG corners. **Fix**: `borderRadius: 0` on the shell; roundness lives inside cards (pills, blocks). Verify corners with PIL after export (verify.mjs does).
 
-**Fix (verified)**: rewrite the source in natural Chinese first (`source/source.<lang>.md`), then write the cards from that. Keep these in English: command names (`/wait-what`), file names (`SKILL.md`), config keys (`allow_implicit_invocation`), product names (`Claude Code`). Rewrite everything else the way you would explain it to a colleague.
+## 5 — Content overflows the footer
 
-**Test**: read each line aloud and ask "would a Chinese developer actually say this?" If it sounds translated, rewrite it.
+Dense cards push the last block onto the footer strip. **Fix**: compress real content — vertical lists → horizontal pills, gaps 12→8, merge items — keeping the plan's must-keeps. Never fix by shrinking fonts below floors.
 
-## Pitfall 3 — Font sizes too small
+## 6 — Outputs scattered; review handoff unclear
 
-**Symptom**: the user said "字还是有点小" (the text is still a bit small). Xiaohongshu feed thumbnails are ~300px wide; small fonts become illegible at that scale.
+Screenshots and PNGs in the parent dir; preview/ littered with temp copies; user can't tell what to review. **Fix**: everything inside the run dir — `preview/` holds only canonical `NN.png` (1x), `exports/` only `NN.png` (3x); delete temp files before handing anything to the user and name the exact files to review.
 
-**Fix (verified)**: the font-size floor in [`card-anatomy.md`](card-anatomy.md) "shared typography". Title 72, body 28, SoftRow 26, Takeaway 28. Secondary annotations down to 18-20px; primary information stays at the floor.
+## 7 — Images silently broken in the single-file build
 
-## Pitfall 4 — Rounded container corners
+A string `src="assets/x.png"` 404s after `vite-plugin-singlefile` hashes assets; the card collapses into a fake void. **Fix**: `import img from "../assets/x.png"`; verify.mjs checks `img.complete && naturalWidth > 0` on every card.
 
-**Symptom**: the exported PNGs had transparent rounded corners ("截图的角落是圆角啊").
+## 8 — Void: content crowds one half
 
-**Root cause**: the Card shell had `borderRadius`, and Playwright's element screenshot captures the rounded shape — leaving transparent pixels at the four corners.
+Content piles in the top half with the takeaway stranded at the bottom (or the mirror). **Fix**: add a visual block or restructure distribution — density fills the canvas; enlarging gaps scatters it with no center of gravity. verify.mjs flags it (threshold defined in `scripts/pixel_audit.py`).
 
-**Fix (verified)**: `borderRadius: 0` on the Card shell. Visual roundness lives inside the card (pills, blocks); the container stays square.
+## 9 — Verification ran on stale artifacts
 
-**Check**: after export, read each PNG with PIL and verify all four corner alphas are 255. See [`export.md`](export.md) "corner verification".
+A piped command (`npm run typecheck | tail`) swallows the failure code; audits then run on the previous build and "pass". **Fix**: `scripts/verify.mjs` runs typecheck → build → audits as one atomic sequence with a single pass/fail summary; never re-assemble the chain by hand.
 
-## Pitfall 5 — Content overlapping the footer (overflow direction)
+## 10 — Unauthorized edits during user feedback rounds
 
-**Symptom**: the user said "12页内容溢出和页脚重叠了" (page 12 overflows and overlaps the footer).
-
-**Root cause**: the footer is `position: absolute; bottom: 0`. When a card's content is dense, the Takeaway (which uses `marginTop: auto` in a flex column) gets pushed below the content area's bottom padding and lands on top of the footer.
-
-**Fix (verified)**:
-- Content area `paddingBottom: 104px` (gives the ~60px footer room + ~40px gap).
-- After building all cards, measure every card: Takeaway bottom vs footer top, gap must be > 0. See [`export.md`](export.md) "layout measurement".
-- When a card overflows, compress the layout (verified techniques): vertical list → horizontal pills; shrink gap (12→8) and padding (20→16); merge items (3 rows → 2). Cut redundancy and decorative spacing; keep the information the plan marked must-keep.
-
-**Real data from the run**: cards 12 and 14 overlapped by 8px each. Card 12 was fixed by turning a 5-row vertical decision tree into 5 horizontal pills + dropping prototype rows 3→2 + gap 12→8. Card 14 was fixed by shrinking the byline block padding 22→16 and font 26→24. After fix: gaps were 27 and 12 respectively.
-
-## Pitfall 6 — Output scattered into the parent directory
-
-**Symptom**: screenshots and PNGs landed in the parent workspace, polluting it.
-
-**Fix (verified)**: every output goes into a subdirectory of the card workspace — `preview/` for 1x check screenshots, `exports/` for 3x delivery PNGs. Playwright's screenshot path is relative to its own cwd; pass a path that resolves inside the card workspace.
-
-## Pitfall 7 — Caption character limits exceeded
-
-**Symptom**: the user said "100字早超了啊" (it's way over 100 characters). The first caption draft had multi-paragraph bodies far exceeding the limit.
-
-**Fix (verified)**: the limits in [`caption-spec.md`](caption-spec.md). Title ≤20, body ≤100, pinned comment ≤300 (every character including spaces and punctuation — that is how the platform counts). Write, then verify with `len()`; if over, compress. No marketing tone ("大佬带你", "效率翻倍").
-
-## Pitfall 8 — Visual weight imbalance (the core quality standard)
-
-**Symptom**: cards that look "broken" — either content piled in the top half with the Takeaway stranded at the bottom leaving a void, or elements forced apart with large gaps to fake fullness.
-
-This is the failure mode other agents reach for most often, because the instinctive fix — "there's empty space, push things apart" — makes it worse.
-
-**Two failure modes**:
-- **Void**: content occupies only the top half. Takeaway, using `marginTop: auto`, sits at the very bottom. The middle is empty. From a distance the card looks like half an image.
-- **Forced gap**: to "fill" the void, gaps between elements are enlarged. The content scatters. There is no center of gravity.
-
-**Fix — fill the canvas by density.** Enlarging gaps to fill space produces the second failure mode (scattered, no center of gravity); add visual blocks or restructure instead. Verified techniques from the run:
-
-| Situation | Verified fix |
-|---|---|
-| Content too sparse (void) | **Add a visual block** — a diagram, a compare panel, an expanded list, a stat pill. Or **restructure the distribution** — the cover's first draft was "big circle top-left + centered text"; it was rebuilt as a split-screen (upper accent block 42% holding the version number, lower canvas 58% holding title + lead + three stat pills + byline). Both halves now hold real content. |
-| A point that is one line of text | **Expand it into a visual block** — the overview page turned "platform layer 3 items + skill layer 4 items" into two LayerCards (title + description + item rows), not paragraphs. Item rows are themselves visual blocks. |
-| A command name or key number | **Enlarge it into a visual anchor** — `/wait-what` at 80px with a "啰嗦 →" state visual; the 3/1/6 counts became three large stat pills. Large typography fills canvas by itself. |
-| Content too dense (overflow, the opposite extreme) | See pitfall 5 — compress layout; keep must-keep information. |
-
-**The single rule**: fixing a void means adding content or restructuring distribution. Enlarging gaps produces the scatter failure mode instead.
-
-**Check**: screenshot the card, hide the Takeaway mentally — if the top half looks empty, the card has a void. Add a visual block or restructure; then re-screenshot. See [`export.md`](export.md) "layout measurement" for the DOM-assisted check.
+Fixing a named item while also "improving" adjacent copy burns trust. **Fix**: confirm understanding of the request and the exact operation list before touching files; change only what the user named; surface adjacent findings as suggestions for the user to decide.

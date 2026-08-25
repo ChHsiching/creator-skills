@@ -1,78 +1,62 @@
-# Card anatomy
+# Card anatomy — the framework, not a template
 
-The card layer this skill adds on top of beautiful-article's scaffold. Every spec here is verified in production (the mattpocock/skills v1.2 deck, andy theme, 14 cards). Apply it as-is.
+The framework below is fixed because the audits and the export depend on it. Everything else — layout, composition, decorative language, type pairing — is **designed fresh for each deck** from the theme's character and the material. `assets/` contains samples from finished decks for inspiration; they are reference, never starting points. A deck that looks like the previous deck is a defect.
 
-## Workspace reshape
+## The fixed framework
 
-beautiful-article's scaffold produces a flowing article (`Article.tsx` + `Cover.tsx` + `sections/`). Delete those three, then build the deck:
-
-- `article/main.tsx` — `<ThemeProvider theme="<id>">` wrapping `<Deck/>`. No `<Article>`.
-- `article/Deck.tsx` — assembler. Imports and orders the N card components. One card per file under `article/cards/NN-*.tsx`.
-- `article/Card.tsx` — the shared shell (below).
-- `article/cards/_shared.tsx` — shared typography + Icon (below).
-- `article/cards/01-cover.tsx` … `NN-ending.tsx` — one file per card.
-
-## Card.tsx — the shared shell
-
-The shell holds the fixed canvas, the page badge, the category tag, the footer, and a decorative dot. Card content goes in `children`.
+### Canvas contract
 
 ```
-width: 1080px, height: 1440px    // 3:4. Export size = PNG size.
+width: 1080px, height: 1440px    // 3:4. Export = PNG size at 3x.
 overflow: hidden
-borderRadius: 0                   // PNG must be square. Rounded corners leave transparent corners.
-data-card={index}                 // screenshot anchor
+borderRadius: 0                  // rounded container corners export transparent
+data-card={index}                // render + audit anchor
 ```
 
-- **Header** (hidden on cover): page badge (theme-accent filled circle, e.g. andy's pumpkin `--hs-orange`) + category tag (soft-accent pill).
-- **Content area**: `position: absolute; inset: 0; paddingTop: 120px; paddingBottom: 104px; paddingX: 72px`. The 104px bottom clearance gives the footer (~60px) room plus a ~40px gap — without it, a full card's Takeaway overlaps the footer.
-- **Footer** (hidden on cover): brand line + `index / N` page count.
-- **Cover variant** (`variant="cover"`): hide header + footer, zero the content padding — the cover fills the whole canvas itself.
-- **Decorative dot**: a large low-opacity theme-accent circle at the bottom-right corner (`bottom: -60px`), the andy "imperfect circle" motif. It intentionally overflows the container (clipped by `overflow: hidden`); exclude it from layout-overflow checks.
+Content area: absolute inset 0, `padding: 150px top / 118px bottom / 72px x` (≈1172px usable height). Footer strip sits at bottom ~38px; the 118px clearance keeps content off it.
 
-## _shared.tsx — shared typography
+### Anchors the audits rely on
 
-Font sizes are large because Xiaohongshu feed thumbnails are ~300px wide — small text becomes illegible. These are the floor, not a suggestion:
+- Shell root: `data-card={index}`
+- Takeaway/final block: `data-takeaway="true"`
+- Footer: `data-footer="true"`
+- Pure decoration that overflows the canvas: `data-decor="true"` (excluded from layout checks)
 
-| Component | Size | Weight | Notes |
-|---|---|---|---|
-| CardTitle | 72px | 800 | Main title of each card |
-| CardTitleSm | 58px | 800 | Dense cards |
-| CardLead | 30px | 600 | One-line framing under the title |
-| Body | 28px | 400 | Prose paragraphs |
-| SoftRow | 26px | 700/400 | Label (accent) + body (text); list items |
-| Takeaway | 28px | 700 | Bottom one-liner, accent-fill background |
-| Icon (in Takeaway) | 34px | — | SVG line icon |
-| Footer | 24px | 600 | Brand + page count |
+Detection is by these attributes on every theme — never by hunting a theme's accent RGB.
 
-Colors use only `--ra-*` tokens and the theme's accent tokens (e.g. andy: `--hs-orange` for fills, `--ra-color-accent-strong` for text-carrying accent). Bright accent fills; deepened accent for text legibility.
+### Typography floors (thumbnail legibility)
 
-## Icon — SVG, never emoji
+Feed thumbnails are ~300px wide. Floors, minimums not targets:
 
-Emoji renders inconsistently across systems and clashes with the theme palette. The Icon component is a set of hand-authored SVG line icons (Feather-like: `stroke=currentColor`, 24×24 viewBox, round caps). The Takeaway's `icon` prop takes an icon **name** (a string key).
-
-Verified icon set: `plug`, `puzzle`, `book`, `edit`, `target`, `wand`, `clipboard`, `tree`, `folder`, `compass`, `broom`, `bulb`, `check`, `x`. Add more by appending to the `ICON_PATHS` map — each entry is JSX of `<path>` elements.
-
-For status pairs (yes/no, do/don't), use `check` and `x` with semantic colors: `check` in `--ra-color-success`, `x` in `--ra-color-risk`.
-
-## Visual techniques (verified repertoire)
-
-Every card earns a visual technique that serves its core idea. These are the ones verified in production — reach for them before inventing new ones:
-
-| Technique | When | Example |
+| Role | Size | Weight |
 |---|---|---|
-| **Split-screen cover** | Cover card | Upper accent block (42%, holds version number + eyebrow) / lower canvas block (58%, holds title + lead + stat pills + byline) |
-| **Layer cards** | Overview / multi-item | Two stacked tinted cards (platform layer / skill layer), each with label + description + item rows |
-| **Flow steps** | Process / pipeline | N steps as columns: numbered circle + title + caption, arrows between |
-| **Compare panels** | Before/after, old/new | Left vs right tinted panels with strikethrough old → highlighted new |
-| **Mapping rows** | Merges / redirects | `from → to` per row, with a "because" note underneath |
-| **Big anchor text** | Skill name / key concept | The command name at 80px as the visual focus, with a state arrow (啰嗦 → /wait-what) |
-| **Stat pills** | Counts / numbers | Large number + small label, in a tinted rounded card |
-| **Process chain** | Main flow | Vertical or horizontal numbered chain (① → ② → ③) in a tinted panel |
-| **Terminal mock** | CLI / interactive | A mock terminal panel showing steps, hidden input, progress |
-| **Role flow** | Handoff / routing | Role boxes connected by arrows (you → questionnaire → them → answer) |
-| **Decision tree** | Options / router | Horizontal pills (numbered, ordered) in a tinted panel |
-| **Config card** | Code / config | Monospace block on a surface panel, syntax-colored with theme tokens |
+| Card title | 72px (58px dense cards) | 700 |
+| Lead under title | 30px | 600 |
+| Body | 28px | 400 |
+| Rows/labels | 26px | 700 label / 400 body |
+| Takeaway | 28px | 700 |
+| Footer | 24px | 600 |
+| Secondary annotation | 20px floor | — |
 
-## Theme accent color (for layout detectors)
+Weights cap at the webfont's range. Line-break rules live in [`typography.md`](typography.md) — the floors and the breaks are one discipline.
 
-The overflow detector (Step 7) finds the Takeaway by its theme-accent background color. The RGB value differs per theme — read it from `node_modules/reacticle/src/theme/themes/<id>/<id>.css` (the `--hs-orange` or equivalent accent-fill variable). For andy: `#ff7e1d` = `rgb(255, 126, 29)`.
+### Icons
+
+SVG line icons, `stroke=currentColor`, 24×24 viewBox, round caps. Emoji never renders consistently across systems and fights the palette. A small hand-authored set (check / x / arrow / bulb / terminal / …) beats an icon library for coherence.
+
+## Screenshots in cards
+
+The screenshot's aspect ratio belongs to its content. Fit the **layout to the screenshot** — move and resize it, never stretch/crop it to fit a pre-designed container.
+
+- Crop at element boundaries of the source page (find sections via `getBoundingClientRect`); a mid-element cut is a defect.
+- Budget before embedding: usable height ≈1172px minus title/footer furniture; image height = display width × source aspect. If it doesn't fit legibly, the screenshot gets its own page with the furniture dropped — a screenshot page holds title + framed screenshot, nothing else.
+- Embed via `import img from "../assets/x.png"` — string `src` paths silently 404 after the single-file build.
+- Shoot at deviceScaleFactor ≥ 3× the display scale so 3x export stays sharp.
+
+## Visual approaches (inspiration, not inventory)
+
+Each card earns one visual idea that carries its point. Repertoire seen to work — reach for these shapes when they serve, invent when they don't: split-screen cover (accent block + canvas block) · layered concept cards · flow steps with numbered nodes · before/after compare panels · mapping rows (`from → to`) · big anchor text (a command/name at 80–200px) · stat pills · terminal mocks · full-bleed evidence pages.
+
+## Filling the canvas
+
+Density fills; spacing fakes. A void (content in the top half, empty bottom) is fixed by adding a visual block or restructuring distribution — enlarging gaps produces a scattered card with no center of gravity. The reverse failure, overflow past the footer, is fixed by compressing real content, keeping the plan's must-keeps. Both are caught by `scripts/verify.mjs`.
