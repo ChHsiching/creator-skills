@@ -12,7 +12,7 @@
       "source": "./skills/video-localization",
       "category": "video",
       "homepage": "https://github.com/ChHsiching/creator-skills",
-      "version": "2026.8.24"
+      "version": "2026.8.26"
     },
     {
       "name": "video-production",
@@ -20,7 +20,7 @@
       "source": "./skills/video-production",
       "category": "video",
       "homepage": "https://github.com/ChHsiching/creator-skills",
-      "version": "2026.8.24"
+      "version": "2026.8.26"
     },
     {
       "name": "image-text-cards",
@@ -28,7 +28,7 @@
       "source": "./skills/image-text-cards",
       "category": "image-text",
       "homepage": "https://github.com/ChHsiching/creator-skills",
-      "version": "2026.8.24"
+      "version": "2026.8.26"
     },
     {
       "name": "novel-promotion",
@@ -36,7 +36,7 @@
       "source": "./skills/novel-promotion",
       "category": "novel",
       "homepage": "https://github.com/ChHsiching/creator-skills",
-      "version": "2026.8.24"
+      "version": "2026.8.26"
     }
   ]
 }

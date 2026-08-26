@@ -1,6 +1,6 @@
 {
   "name": "video-localization",
-  "version": "2026.8.24",
+  "version": "2026.8.26",
   "description": "Bring an existing video over the language barrier: download it, transcribe, subtitle, and optionally re-voice it in Chinese.",
   "skills": "skills"
 }

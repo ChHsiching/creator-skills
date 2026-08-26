@@ -9,7 +9,7 @@ Usage (CLI):
   python full_dub.py synth    <output-root> <name>   # stage 1: TTS synthesis
   python full_dub.py timeline <output-root> <name>   # stage 2: timeline math
   python full_dub.py retime   <output-root> <name>   # stage 3: video segments + interpolation
-  python full_dub.py burn     <output-root> <name>   # stage 4: concat + audio + subtitles + burn
+  python full_dub.py burn     <output-root> <name> [--keep-subs]  # stage 4: concat + audio + subtitles + burn
   python full_dub.py full     <output-root> <name>   # all four, in sequence
 
 Usage (from cook via importlib):
@@ -335,6 +335,65 @@ def stage_timeline(output_root, name: str):
 
 # ===== Stage 3: video segments + minterpolate =====
 
+# A span shorter than ~2 source frames has no real footage to stretch:
+# ffmpeg's frame duplication under setpts lands far off the planned duration
+# no matter the retry count (the 41-segment incident).
+_FRAME_MIN_DUR = 0.045
+
+
+def _segment_cmds(seg, raw_mp4: Path, out: Path, workdir: Path):
+    """Build the ffmpeg command(s) that render one timeline segment to a vseg.
+
+    Every command pins the output to the exact CFR-60 frame count via
+    -frames:v round(new_dur*60), so duration quantizes to the plan (within
+    one frame) instead of wherever ffmpeg's frame duplication stops. A
+    sub-frame span is rendered as a held frame: extract the frame at the
+    span's midpoint, then loop it for exactly N frames (a static pause).
+    Returns (commands, label); commands run in order, output is the last."""
+    os_v = seg["orig_start"]; oe_v = seg["orig_end"]
+    orig_dur = oe_v - os_v
+    new_dur = seg["new_dur"]
+    factor = new_dur / orig_dur if orig_dur > 0 else 1.0
+    speed = seg["speed"]
+    frames = max(1, round(new_dur * 60))
+
+    if orig_dur < _FRAME_MIN_DUR:
+        mid = os_v + orig_dur / 2
+        png = workdir / (out.stem + "_frame.png")
+        extract = ["ffmpeg", "-y", "-ss", f"{mid:.3f}", "-i", str(raw_mp4),
+                   "-frames:v", "1", str(png)]
+        hold = ["ffmpeg", "-y", "-loop", "1", "-i", str(png),
+                "-an", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
+                "-pix_fmt", "yuv420p", "-r", "60", "-frames:v", str(frames), str(out)]
+        return [extract, hold], f"hold {frames}f"
+
+    if seg["kind"] == "cue" and speed < 0.95:
+        vf = (f"setpts={factor:.6f}*PTS,"
+              f"minterpolate=fps=60:mi_mode=mci:mc_mode=aobmc:"
+              f"me_mode=bidir:me=epzs:vsbmc=1")
+        label = f"slow {speed:.2f}x+interp"
+    elif seg["kind"] == "cue":
+        vf = f"setpts={factor:.6f}*PTS"
+        label = f"{'fast' if speed>1.05 else 'keep'} {speed:.2f}x"
+    else:
+        # A gap-absorbing adjuster (adjust_timeline.py) extends gaps to
+        # cover capped-cue audio overrun — cut those stretched (setpts;
+        # pauses are static so no minterpolate needed). Unextended gaps
+        # pass through 1:1 as before.
+        if factor > 1.001:
+            vf = f"setpts={factor:.6f}*PTS"
+            label = f"gap+{factor:.2f}x"
+        else:
+            vf = "null"
+            label = "gap"
+
+    cmd = ["ffmpeg", "-y", "-ss", f"{os_v:.3f}", "-t", f"{orig_dur:.3f}",
+           "-i", str(raw_mp4),
+           "-vf", vf, "-an", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
+           "-r", "60", "-frames:v", str(frames), str(out)]
+    return [cmd], label
+
+
 def stage_retime(output_root, name: str):
     p = _paths(output_root, name)
     p["vsegs"].mkdir(parents=True, exist_ok=True)
@@ -366,49 +425,34 @@ def stage_retime(output_root, name: str):
             except OSError:
                 pass
 
-        os_v = seg["orig_start"]; oe_v = seg["orig_end"]
-        orig_dur = oe_v - os_v
+        cmds, label = _segment_cmds(seg, p["raw_mp4"], out, p["work"])
         new_dur = seg["new_dur"]
-        factor = new_dur / orig_dur if orig_dur > 0 else 1.0
-        speed = seg["speed"]
-
-        if seg["kind"] == "cue" and speed < 0.95:
-            vf = (f"setpts={factor:.6f}*PTS,"
-                  f"minterpolate=fps=60:mi_mode=mci:mc_mode=aobmc:"
-                  f"me_mode=bidir:me=epzs:vsbmc=1")
-            label = f"slow {speed:.2f}x+interp"
-        elif seg["kind"] == "cue":
-            vf = f"setpts={factor:.6f}*PTS"
-            label = f"{'fast' if speed>1.05 else 'keep'} {speed:.2f}x"
-        else:
-            # A gap-absorbing adjuster (adjust_timeline.py) extends gaps to
-            # cover capped-cue audio overrun — cut those stretched (setpts;
-            # pauses are static so no minterpolate needed). Unextended gaps
-            # pass through 1:1 as before.
-            if factor > 1.001:
-                vf = f"setpts={factor:.6f}*PTS"
-                label = f"gap+{factor:.2f}x"
-            else:
-                vf = "null"
-                label = "gap"
-
-        cmd = ["ffmpeg", "-y", "-ss", f"{os_v:.3f}", "-t", f"{orig_dur:.3f}",
-               "-i", str(p["raw_mp4"]),
-               "-vf", vf, "-an", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
-               "-r", "60", str(out)]
+        orig_dur = seg["orig_end"] - seg["orig_start"]
 
         # Retry loop: ffmpeg can return 0 yet write a truncated file (moov atom
         # missing) that ffprobe rejects. Probe each output; redo on failure.
         for attempt in range(MAX_SEG_RETRIES + 1):
             t0 = time.time()
-            r = subprocess.run(cmd, capture_output=True, text=True)
+            rc = 0
+            for cmd in cmds:
+                r = subprocess.run(cmd, capture_output=True, text=True)
+                if r.returncode != 0:
+                    rc = r.returncode
+                    break
             wall = time.time() - t0
-            if r.returncode != 0:
+            if rc != 0:
                 log(f"  [{i+1}/{len(timeline)}] ERR seg {i} (attempt {attempt+1}): {r.stderr[-200:]}")
                 ok, reason = False, "ffmpeg non-zero exit"
             else:
                 ok, reason = _vseg_is_valid(out, new_dur)
             if ok:
+                # drop the held-frame temp png if the hold path was used
+                if len(cmds) > 1:
+                    try:
+                        workdir_png = p["work"] / (out.stem + "_frame.png")
+                        workdir_png.unlink()
+                    except OSError:
+                        pass
                 break
             # Corrupted output — delete so the retry (or a later run) regenerates.
             try:
@@ -442,17 +486,27 @@ def stage_retime(output_root, name: str):
 # ===== Stage 4: concat + audio + subtitles + burn =====
 
 # The dub burns bilingual subtitles in the same bottom-bar layout as the
-# bilingual release from video-subtitle: EN (full sentences mapped onto the
-# dub's re-timed clock) over ZH (shorten/merge-short fragments). Font sizes
-# and margins are subtitles.py's bottom-bar defaults (ZH 64 / EN 44, marginv
-# 140) — no overrides here, so the two releases can't drift apart.
+# bilingual release from video-subtitle: ZH (shorten/merge-short fragments)
+# on top, EN (full sentences mapped onto the dub's re-timed clock) below.
+# Font sizes and margins are subtitles.py's bottom-bar defaults (ZH 64 /
+# EN 44, marginv 140) — no overrides here, so the two releases can't drift.
 _DUB_BAR = 220
 
 
-def stage_burn(output_root, name: str):
+def stage_burn(output_root, name: str, keep_subs: bool = False):
     p = _paths(output_root, name)
     if not p["timeline_json"].exists():
         log("  ERROR: missing timeline.json"); sys.exit(1)
+    # Validate --keep-subs inputs BEFORE any ffmpeg work: 4a re-encodes the
+    # whole video and 4b reassembles dub.wav — minutes of work that would be
+    # wasted when the flag's inputs are missing. The bilingual SRT is checked
+    # too: the ASS rebuild (always-on) reads it.
+    if keep_subs:
+        for f in (p["dubbing_merged_srt"], p["work"] / "dubbing.en.merged.srt",
+                  p["work"] / "dubbing.bilingual.srt"):
+            if not f.exists():
+                log(f"  ERROR: --keep-subs needs {f} on disk; run a plain burn first")
+                sys.exit(1)
     with open(p["timeline_json"], encoding="utf-8") as f:
         data = json.load(f)
     timeline = data["timeline"]
@@ -599,66 +653,82 @@ def stage_burn(output_root, name: str):
     log(f"    dub.wav: {get_dur(p['dub_wav']):.2f}s")
 
     # 4c: generate SRTs (pre-shorten, on the new timeline)
-    log("  4c: generate dubbing.srt + dubbing.en.srt")
-    srt_lines = []
-    for i, (_, _, cs, ce, text) in enumerate(audio_plan):
-        srt_lines += [str(i+1), f"{fmt_ts(cs)} --> {fmt_ts(ce)}", text, ""]
-    with open(p["dubbing_srt"], "w", encoding="utf-8") as f:
-        f.write("\n".join(srt_lines))
+    # --keep-subs skips 4c + 4d's regeneration entirely and reuses the
+    # subtitle files already on disk — the recovery path for hand-edited
+    # dubbing.bilingual.srt / merged SRTs after the post-burn quality gate
+    # (SKILL.md Step 7). Regenerating from source would silently wipe those
+    # edits (split points are computed by shorten, not stored in any input
+    # file). The ASS is always rebuilt from the on-disk bilingual SRT so
+    # style stays in sync with the pipeline.
+    if keep_subs:
+        log("  4c/4d: --keep-subs — reusing on-disk subtitle files (ass + burn only)")
+    else:
+        log("  4c: generate dubbing.srt + dubbing.en.srt")
+        srt_lines = []
+        for i, (_, _, cs, ce, text) in enumerate(audio_plan):
+            srt_lines += [str(i+1), f"{fmt_ts(cs)} --> {fmt_ts(ce)}", text, ""]
+        with open(p["dubbing_srt"], "w", encoding="utf-8") as f:
+            f.write("\n".join(srt_lines))
 
-    # EN side: full-sentence English (en.full.srt texts) placed on the
-    # re-timed clock. Cue idx i's window [new_start, new_end] is exactly where
-    # its Chinese audio plays, so the mapping is index-aligned by construction.
-    # This SRT feeds the biliteral merge in 4d and ships as cloud-srt/en.dub.srt.
-    en_texts = {}
-    with open(p["en_full_srt"], encoding="utf-8") as f:
-        for m in _CUE_RE.finditer(f.read()):
-            en_texts[int(m[1])] = re.sub(r"\s+", " ", m[4].strip())
-    n_cues = sum(1 for s in timeline if s["kind"] == "cue")
-    assert len(en_texts) == n_cues, \
-        f"en.full.srt has {len(en_texts)} cues but timeline has {n_cues} — regenerate timeline"
-    en_srt_lines = []
-    for seg in timeline:
-        if seg["kind"] != "cue":
-            continue
-        en_srt_lines += [str(seg["idx"]),
-                         f"{fmt_ts(seg['new_start'])} --> {fmt_ts(seg['new_end'])}",
-                         en_texts[seg["idx"]], ""]
-    with open(p["dubbing_en_srt"], "w", encoding="utf-8") as f:
-        f.write("\n".join(en_srt_lines))
+        # EN side: full-sentence English (en.full.srt texts) placed on the
+        # re-timed clock. Cue idx i's window [new_start, new_end] is exactly
+        # where its Chinese audio plays, so the mapping is index-aligned by
+        # construction. This SRT feeds the biliteral merge in 4d and ships
+        # as cloud-srt/en.dub.srt.
+        en_texts = {}
+        with open(p["en_full_srt"], encoding="utf-8") as f:
+            for m in _CUE_RE.finditer(f.read()):
+                en_texts[int(m[1])] = re.sub(r"\s+", " ", m[4].strip())
+        n_cues = sum(1 for s in timeline if s["kind"] == "cue")
+        assert len(en_texts) == n_cues, \
+            f"en.full.srt has {len(en_texts)} cues but timeline has {n_cues} — regenerate timeline"
+        en_srt_lines = []
+        for seg in timeline:
+            if seg["kind"] != "cue":
+                continue
+            en_srt_lines += [str(seg["idx"]),
+                             f"{fmt_ts(seg['new_start'])} --> {fmt_ts(seg['new_end'])}",
+                             en_texts[seg["idx"]], ""]
+        with open(p["dubbing_en_srt"], "w", encoding="utf-8") as f:
+            f.write("\n".join(en_srt_lines))
 
     # 4d: shorten + merge-short + biliteral + ass (same pipeline as video-subtitle)
     # shorten splits long cues into single-line cues, allocating sub-cue time
     # by display-width proportion (wlen). This keeps each cue one zh line.
-    log("  4d: shorten + merge-short + biliteral + ass (via video-subtitle's subtitles.py)")
+    # With --keep-subs the regeneration chain is skipped and the on-disk
+    # merged/bilingual SRTs are used as-is (see the 4c note).
     subs_mod = _import_subtitles_module()
     short_srt = p["work"] / "dubbing.short.srt"
     merged_srt = p["dubbing_merged_srt"]
     bilingual_srt = p["work"] / "dubbing.bilingual.srt"
     cooked_ass = p["work"] / "dubbing.cooked.ass"
-    _run_subs(subs_mod, ["shorten", str(p["dubbing_srt"]), str(short_srt),
-                         "--lang", "zh", "--max-zh", "56"])
-    _run_subs(subs_mod, ["merge-short", str(short_srt), str(merged_srt),
-                         "--min-dur", "1.2", "--max-len", "56", "--lang", "zh"])
-    # EN full sentences are display-unbounded — up to ~260 chars wrap to 4-5
-    # lines and overflow the EN band under the ZH layer (ZH is layer 0, drawn
-    # over EN's layer -1). Apply the same shorten + merge-short the bilingual
-    # release uses (MAX_EN=160 ~= 2 wrapped lines) so the union's EN events
-    # fit the bar. The merged EN also ships as cloud-srt/en.dub.srt, matching
-    # the bilingual release's en.merged.srt convention.
-    en_short_srt = p["work"] / "dubbing.en.short.srt"
-    en_merged_srt = p["work"] / "dubbing.en.merged.srt"
-    _run_subs(subs_mod, ["shorten", str(p["dubbing_en_srt"]), str(en_short_srt),
-                         "--lang", "en"])
-    _run_subs(subs_mod, ["merge-short", str(en_short_srt), str(en_merged_srt),
-                         "--min-dur", "1.2", "--max-len", "160", "--lang", "en"])
-    # biliteral unions the (now shortened) EN with the fragmented ZH; when a
-    # span from either language crosses the other's breakpoint its text
-    # repeats across the cues it spans — the bilingual release's structural
-    # repetition. Flag with care in Gate C: repetition on either side is the
-    # design, not a defect.
-    _run_subs(subs_mod, ["biliteral", str(en_merged_srt),
-                         str(merged_srt), str(bilingual_srt)])
+    if not keep_subs:
+        log("  4d: shorten + merge-short + biliteral + ass (via video-subtitle's subtitles.py)")
+        _run_subs(subs_mod, ["shorten", str(p["dubbing_srt"]), str(short_srt),
+                             "--lang", "zh", "--max-zh", "56"])
+        _run_subs(subs_mod, ["merge-short", str(short_srt), str(merged_srt),
+                             "--min-dur", "1.2", "--max-len", "56", "--lang", "zh"])
+        # EN full sentences are display-unbounded — up to ~260 chars wrap to 4-5
+        # lines and overflow the EN band under the ZH layer (ZH is layer 0, drawn
+        # over EN's layer -1). Apply the same shorten + merge-short the bilingual
+        # release uses (MAX_EN=160 ~= 2 wrapped lines) so the union's EN events
+        # fit the bar. The merged EN also ships as cloud-srt/en.dub.srt, matching
+        # the bilingual release's en.merged.srt convention.
+        en_short_srt = p["work"] / "dubbing.en.short.srt"
+        en_merged_srt = p["work"] / "dubbing.en.merged.srt"
+        _run_subs(subs_mod, ["shorten", str(p["dubbing_en_srt"]), str(en_short_srt),
+                             "--lang", "en"])
+        _run_subs(subs_mod, ["merge-short", str(en_short_srt), str(en_merged_srt),
+                             "--min-dur", "1.2", "--max-len", "160", "--lang", "en"])
+        # biliteral unions the (now shortened) EN with the fragmented ZH; when a
+        # span from either language crosses the other's breakpoint its text
+        # repeats across the cues it spans — the bilingual release's structural
+        # repetition. Flag with care in the post-burn quality gate: repetition on either side is the
+        # design, not a defect.
+        _run_subs(subs_mod, ["biliteral", str(en_merged_srt),
+                             str(merged_srt), str(bilingual_srt)])
+    else:
+        en_merged_srt = p["work"] / "dubbing.en.merged.srt"
     _run_subs(subs_mod, ["ass", str(bilingual_srt), str(cooked_ass),
                          "--bottom-bar", str(_DUB_BAR)])
     shutil.copyfile(cooked_ass, p["burn_ass"])
@@ -736,6 +806,11 @@ if __name__ == "__main__":
     cmd = sys.argv[1]
     output_root = sys.argv[2]
     name = sys.argv[3] if len(sys.argv) > 3 else None
+    flags = [a for a in sys.argv[4:] if a.startswith("--")]
+    keep_subs = "--keep-subs" in flags
+    if keep_subs and cmd != "burn":
+        print("--keep-subs applies to the burn stage only")
+        sys.exit(1)
     if cmd == "full":
         stage_synth(output_root, name)
         stage_timeline(output_root, name)
@@ -743,7 +818,10 @@ if __name__ == "__main__":
         stage_burn(output_root, name)
         log("all stages complete")
     elif cmd in _STAGES:
-        _STAGES[cmd](output_root, name)
+        if cmd == "burn":
+            stage_burn(output_root, name, keep_subs=keep_subs)
+        else:
+            _STAGES[cmd](output_root, name)
     else:
         print(f"unknown stage: {cmd}\n{__doc__}")
         sys.exit(1)

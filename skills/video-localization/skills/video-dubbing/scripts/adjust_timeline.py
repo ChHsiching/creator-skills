@@ -123,6 +123,22 @@ def main():
              stats["cue_fallback_s"], stats["sped_up"]))
     print("total_new %.2fs | tiling %s | audio-no-overlap %s | monotonic %s"
           % (data["total_new"], ok_tile, ok_audio, ok_mono))
+
+    # Freeze advisory: the gap-absorbing design assumes stretched pauses read
+    # as natural hesitations — true around 1.2-2x, visibly a freeze beyond
+    # ~3x (a 0.06s pause stretched 23x held for 1.4s on a shipped opening).
+    # Name the extreme gaps so the translator can shorten the neighbouring
+    # Chinese instead of shipping the freeze.
+    deep = [(i, (s["orig_end"] - s["orig_start"]) / s["new_dur"])
+            for i, s in enumerate(segs)
+            if s["kind"] == "gap" and s["new_dur"] > 0
+            and (s["orig_end"] - s["orig_start"]) / s["new_dur"] < 1 / 3]
+    if deep:
+        worst = min(r for _, r in deep)
+        print("WARNING: %d gap(s) stretched >3x (worst %.1fx) — freeze-frame risk; "
+              "consider shortening the Chinese of the neighbouring cues"
+              % (len(deep), 1 / worst))
+
     assert ok_tile and ok_audio and ok_mono, "INVARIANT VIOLATION"
 
 
