@@ -69,8 +69,8 @@ These are defaults you do, not questions you ask. Delivery runs as **four named 
 
 - **G1 — stills approval**: every distinct layout/asset state as a labeled stills sheet; the user approves content and assets.
 - **G2 — cheap full render with audio** (1080p; 540p for long videos): spec check passes (ffprobe vs intake answers), then the user approves content and timing.
-- **G3 — content gates on the cheap render**: audio mix within loudness targets (ebur128 three-window), blank-scene sweep clean (85%-frame pixel diff), neutral-vision reads clean. All zero-defect.
-- **G4 — final render + artifacts**: 4K render (read `remotion-4k-polish` first; long videos: `scripts/render_segments.sh`), every platform variant rendered and spec-checked, covers verified per ratio, publish copy complete and length-checked, ending spot-checked, output directory holds deliverables only.
+- **G3 — content gates on the cheap render**: audio mix within loudness targets (ebur128 three-window), blank-scene sweep clean (85%-frame pixel diff), first frame carries content, neutral-vision reads clean. All zero-defect.
+- **G4 — final render + artifacts**: 4K render through `scripts/render_segments.sh` (read `remotion-4k-polish` first for the 4K path), every platform variant rendered and spec-checked, covers verified per ratio, publish copy complete and length-checked, ending spot-checked, output directory holds deliverables only.
 
 Done when: G1–G4 have each cleared in order, ffprobe specs match the intake answers, and the ending frames of every variant have been spot-checked.
 
@@ -79,5 +79,5 @@ Done when: G1–G4 have each cleared in order, ffprobe specs match the intake an
 Deterministic helpers under `scripts/` — run them instead of re-deriving the code (each bakes in a debugged-once pitfall):
 
 - `scripts/srt_to_json.py` — SRT → Remotion subtitle JSON (bilingual split + count/first/last verification)
-- `scripts/render_segments.sh` — segmented parallel render driver: resume, stagger, retry, integrity gate before concat
+- `scripts/render_segments.sh` — segmented parallel render driver: orphan cleanup, resume, stagger, retry, integrity gate before concat
 - `scripts/check_segments.sh` — post-kill moov/duration audit for any segment directory

@@ -6,6 +6,18 @@ Mechanics for the delivery gates, timing, verification, audio, covers, platform 
 
 Render one still per distinct layout/asset state (not per scene), present as a labeled sheet, and get the user's explicit go. The gate clears on the user's approval — record it; silence is not approval, and G2's render command is not issued before it.
 
+**Preflight** — self-check the stills before the sheet reaches the user; every line traces to a real rejection:
+
+- *Thumbnail read*: inspect at phone-thumbnail scale and grow any type that stops reading there. Full-size inspection overstates legibility — viewers meet the thumbnail first.
+- *System vocabulary*: extend the established visual system with its own vocabulary (rules, tints, type). Borrowings from other archetypes — card boxes, badges, panels — are a different language; route them through the storyboard for approval instead of slipping them into stills.
+- *Optical center*: a centered hero element sits at ~42-45% frame height; the geometric middle reads low.
+- *Explicit line breaks*: element and label text breaks where its meaning breaks — hand-set lines, never auto-wrap, which splits labels mid-thought.
+- *Attribution tags*: sources ride as small tags beside the claim (官方口径 / 社区结论 style), stated as speech or deleted; parentheticals and narrator self-talk ("下一屏揭晓", "详见X章") go — the sequence itself navigates.
+- *Self-evident terms*: a term lifted from source material (a demo's scene name, artifact jargon) carries one phrase of setup; proper nouns use the source's display name, never the slug/ID.
+- *SVG icons*: arrows and marks are hand-drawn SVG — glyph stand-ins (→ ↓ ▸ emoji) drag in font-metric surprises. After any icon swap, measure alignment pixel-wise (color-cluster the icon ink against its anchor text's ink; inline-SVG baseline behavior is not what you'd guess).
+- *Fill voids with content*: an empty region earns another fact, never wider margins.
+- *Machine acceptance, every still*: an edge-clipping scan (all content pixels within frame bounds) catches overflow the eye forgives. Render each still at two frames for self-check — the settled frame, plus one from ~20% into its scene's entry animation — and read the early one: a settled-only pass hides animation-order bugs such as elements already visible at frame 0. The user sheet stays the settled frames.
+
 ## G2 — cheap full render with audio
 
 Render the full video at 1080p **with the final audio mix in place** — G3a's loudness check reads the real mix, so a silent or scratch-audio draft makes the whole of G3 meaningless. (1080p rather than 540p because G3b's diff threshold and G3c's vision reads are calibrated at full pixels; 540p halves the diffs and blurs the reads. Use 540p only for long videos where 1080p is too slow — see the scale note below.) Two checks, in order:
@@ -21,7 +33,7 @@ Render the full video at 1080p **with the final audio mix in place** — G3a's l
 
 ## G3 — content gates on the cheap render
 
-All three run on the G2 file — content truth lives in the rendered file (a stale bundle renders stills fine while the video breaks, so stills alone never clear content). Fixes are cheapest here. Threshold heuristics lose to the pixel diff and neutral reads: textured or sparse layouts that defeat a brightness check get resolved by G3c, not by relaxing the gate.
+All four run on the G2 file — content truth lives in the rendered file (a stale bundle renders stills fine while the video breaks, so stills alone never clear content). Fixes are cheapest here. Threshold heuristics lose to the pixel diff and neutral reads: textured or sparse layouts that defeat a brightness check get resolved by G3c, not by relaxing the gate.
 
 **G3a — audio mix** (targets in the loudness section below):
 ```
@@ -47,11 +59,18 @@ for s in scenes:
 ```
 Any scene flagged EMPTY fails the gate. (The scenes list is the generated timing table — same source of truth. Threshold provenance, measured on a real render: content scenes diff 3.6-4.2, empty/black scenes 0.0-1.3, sparse dark end-cards 1.3-2.5 — the gray zone is exactly what G3c arbitrates. Calibrated at 1080p; on a 540p render halve it, or lean on G3c.)
 
+**G3b′ — first frame**: extract frame 0 and measure it:
+```
+ffmpeg -y -v error -i <video> -frames:v 1 first.png
+python -c "from PIL import Image; import numpy as np; a = np.array(Image.open('first.png').convert('L')).astype(float); print('std', round(a.std(), 1), 'BLANK' if a.std() <= 2 else 'ok')"
+```
+A near-uniform frame (std ≤ 2 on a flat-background theme) fails. A fade-in envelope on the first scene renders an all-background opening frame, which reads as "loading" on platforms — the first scene enters with no fade-in (a `fadeInFrames=0` branch on the dissolve component; when an envelope argument can be zero, guard the interpolate range's monotonicity — `[0, 0, …]` throws at render time, not at authoring).
+
 **G3c — neutral content reads**: vision-model reads of extracted frames use neutral prompts (describe what is present). A read fails when the description reports blank or black content, or content contradicting what the timing table places at that frame; it passes when the description names the scene's actual content. Deep-dark or sparse layouts that defeat G3b's threshold get resolved here, not by relaxing the gate.
 
 ## G4 — final render + artifacts
 
-Render final (4K: read `remotion-4k-polish` first; long videos: `scripts/render_segments.sh` + `check_segments.sh`), then each artifact's check:
+Render final through the segmented driver — `scripts/render_segments.sh` (strategy in the Final-render section below; 4K path choice: read `remotion-4k-polish` first) — then each artifact's check:
 
 **Covers** — per required ratio, dimensions verified:
 ```python
@@ -93,12 +112,12 @@ bilibili transcodes without loudness normalization — what you upload is what v
 - Music bed: 12-18 dB under the voice; the high end when clarity matters
 - Verify with an ebur128 three-window read: whole file, a speech window, a music-only window
 
-## Long-video render strategy (anything over ~15 minutes)
+## Final-render strategy (every G4 render)
 
-**Maximize parallelism to the actual hardware — measure, then compute, never accept a default queue count:**
+**The segmented driver is the default for finals, whatever the length** — a bare single-process render is the skip-this-step failure mode (one measured run: 58-minute single-process ETA vs 15 minutes through the driver). **Maximize parallelism to the actual hardware — measure, then compute, never accept a default queue count:**
 
-1. Probe: logical CPU count and FREE RAM (not total — a "cleaned" machine frees twice the queues).
-2. Calibrate on the first render: an instance saturates ~3-4 cores regardless of `--concurrency` (architectural), but its RAM scales with output resolution (~6-8GB at 4K, less at 1080p) — measure one running instance, then compute `queues = min(floor(cores/4), floor(free_ram_gb / measured_instance_gb), remaining_segment_count)`. Two remaining segments means two queues; a third lane has nothing to render.
+1. Probe: logical CPU count and FREE RAM (not total — a "cleaned" machine frees twice the queues). Killed renders squat GBs of RAM in orphan ffmpeg/chrome-headless processes before the probe runs — `render_segments.sh` kills the chrome-headless shells at startup and warns on ffmpeg; kill the ffmpeg ones by hand when free RAM looks low (a hand-driven run cleans both by hand first). The shell kill also takes down a concurrently running Remotion render's workers — confirm none is live before launching. Script cleanup and the RAM probe are PowerShell steps; elsewhere, clean and measure by hand.
+2. Calibrate on the first render: an instance saturates ~3-4 cores regardless of `--concurrency` (architectural), but its RAM scales with output resolution (~6-8GB at 4K, less at 1080p) — measure one running instance, then compute `queues = min(floor(cores/4), floor(free_ram_gb / measured_instance_gb), remaining_segment_count)`. Two remaining segments means two queues; a third lane has nothing to render. **Pass the computed value as `--queues N`** — the script's auto mode assumes a 4K-sized 7 GB/queue (`--queue-gb` overrides) and floors the division, so on a busy machine it lands on 1 queue and quietly forfeits the parallelism (the measured 15-minute run above needed `--queues 3`).
 
 - **Segmented rendering**: split into N frame-exact segments (each an independent encode), render sequentially or in 2-3 parallel instance queues, concat with stream copy. Zero quality loss: same encoder settings per segment, no re-encode at the join.
 - **Resume**: segments already on disk are skipped — a crashed run costs only the in-flight segment.
@@ -106,7 +125,7 @@ bilibili transcodes without loudness normalization — what you upload is what v
 
 ## Windows render environment
 
-- A killed render leaves node/chrome-headless processes alive that lock partial outputs (`rm` reports "Device or resource busy"). Kill them first — `Get-CimInstance Win32_Process` filtered on `remotion` in the command line, `Stop-Process` each — then delete partials.
+- A killed render leaves node/chrome-headless-shell/ffmpeg processes alive — the same residue the final-render strategy's step 1 cleans for the RAM probe, plus node instances that lock partial outputs (`rm` reports "Device or resource busy"). For the locked-output case kill by command line — `Get-CimInstance Win32_Process` filtered on `remotion`, `Stop-Process` each — then delete partials.
 - Render commands run bare, no pipes: `… | tail` eats the real exit code and a failed render reports success.
 - Pass `--port` explicitly — the renderer's internal server defaults to 3000, which collides with WSL port forwarding on dev machines.
 - Keep `public/` lean: narration WAVs and screenshots pile into tens of MB and slow every bundle copy. On an intermittent copy timeout, retry once before diagnosing.

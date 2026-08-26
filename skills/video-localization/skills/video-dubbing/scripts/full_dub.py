@@ -257,11 +257,12 @@ def stage_synth(output_root, name: str):
     if done < len(cues):
         log("loading IndexTTS2...")
         t0 = time.time()
-        from indextts.infer_v2 import IndexTTS2
+        from indextts.infer_v2_5 import IndexTTS2
         tts = IndexTTS2(
             cfg_path=os.path.join(INDEXTTS_DIR, "checkpoints", "config.yaml"),
             model_dir=os.path.join(INDEXTTS_DIR, "checkpoints"),
-            use_fp16=False, use_cuda_kernel=False, use_deepspeed=False, device="cpu",
+            use_bf16=False, use_cuda_kernel=False, use_deepspeed=False, device="cpu",
+            use_qwen_emo=False,
         )
         log(f"loaded in {time.time()-t0:.1f}s")
 
@@ -273,7 +274,7 @@ def stage_synth(output_root, name: str):
             continue
         t1 = time.time()
         ref = refs[speakers[i]] if speakers else p["ref_wav"]
-        tts.infer(spk_audio_prompt=str(ref), text=zh, output_path=str(out), use_random=False)
+        tts.infer(spk_audio_prompt=str(ref), text=zh, output_path=str(out), lang="zh", use_random=False)
         dur = get_dur(out)
         n_done += 1
         elapsed = time.time() - t_start

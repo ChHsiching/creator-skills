@@ -72,14 +72,15 @@ def main():
     for mod in list(sys.modules):
         if mod.startswith("indextts"):
             del sys.modules[mod]
-    from indextts.infer_v2 import IndexTTS2
+    from indextts.infer_v2_5 import IndexTTS2
     t0 = time.time()
     tts = IndexTTS2(
         cfg_path=os.path.join(args.indextts_dir, "checkpoints", "config.yaml"),
         model_dir=os.path.join(args.indextts_dir, "checkpoints"),
-        use_fp16=False,
+        use_bf16=False,
         use_cuda_kernel=False,
         use_deepspeed=False,
+        use_qwen_emo=True,
     )
     print(f"    loaded in {time.time()-t0:.1f}s", flush=True)
 
@@ -97,6 +98,7 @@ def main():
         tts.infer(
             spk_audio_prompt=args.ref_voice,
             text=sent,
+            lang="zh",
             output_path=out,
             use_emo_text=True,
             emo_alpha=args.emo_alpha,

@@ -177,13 +177,14 @@ class IndexTTS2Backend(TTSBackend):
         for mod in list(sys.modules):
             if mod.startswith("indextts"):
                 del sys.modules[mod]
-        from indextts.infer_v2 import IndexTTS2
+        from indextts.infer_v2_5 import IndexTTS2
         indextts_dir = os.environ.get("INDEXTTS_DIR", "")
         cfg = os.path.join(indextts_dir, "checkpoints", "config.yaml")
         mdir = os.path.join(indextts_dir, "checkpoints")
         self.model = IndexTTS2(
             cfg_path=cfg, model_dir=mdir,
-            use_fp16=False, use_cuda_kernel=False, use_deepspeed=False,
+            use_bf16=False, use_cuda_kernel=False, use_deepspeed=False,
+            use_qwen_emo=True,
         )
         self.ref_wav = ref_wav
         self.emo_alpha = float(os.environ.get("DUB_EMO_ALPHA", "0.6"))
@@ -192,6 +193,7 @@ class IndexTTS2Backend(TTSBackend):
         self.model.infer(
             spk_audio_prompt=self.ref_wav,
             text=text,
+            lang="zh",
             output_path=out_path,
             use_emo_text=True,
             emo_alpha=self.emo_alpha,

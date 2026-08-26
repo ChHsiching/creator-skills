@@ -1,6 +1,7 @@
 #!/bin/bash
-# Segmented parallel render driver for long Remotion videos, with the
+# Segmented parallel render driver for Remotion final renders, with the
 # session-proven safeguards baked in:
+#   - startup orphan-renderer cleanup (killed runs starve the queue computation)
 #   - frame-exact segments, stream-copy concat (zero quality loss)
 #   - skip-existing resume (a crash costs only the in-flight segment)
 #   - staggered queue starts (process-spawn spikes collide otherwise)
@@ -9,26 +10,48 @@
 #
 # Usage:
 #   render_segments.sh <entry.ts(x)> <CompositionId> <total-frames> <out-mp4> \
-#                      [--segments N] [--queues N] [--concurrency N]
+#                      [--segments N] [--queues N] [--concurrency N] [--queue-gb N]
 #                      [-- extra render args, e.g. --scale=2 --props='{"x":1}']
 set -eu
 ENTRY="${1:?entry}"; COMP="${2:?composition id}"; TOTAL="${3:?total frames}"; OUT="${4:?out.mp4}"
 shift 4
-SEGMENTS=12; QUEUES=auto; CONCURRENCY=8
+SEGMENTS=12; QUEUES=auto; CONCURRENCY=8; QUEUE_GB=7
 while [ $# -gt 0 ]; do
   case "$1" in
     --segments) SEGMENTS="$2"; shift 2 ;;
     --queues) QUEUES="$2"; shift 2 ;;  # or auto: computed from measured cores+free RAM
     --concurrency) CONCURRENCY="$2"; shift 2 ;;
+    --queue-gb) QUEUE_GB="$2"; shift 2 ;;  # GB per queue assumed by auto (7 ≈ a 4K instance; 1080p runs are smaller)
     --) shift; break ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
 EXTRA="$*"
+# --queue-gb guard: empty/non-numeric/0 would zero-divide the auto computation below;
+# 10# normalizes leading zeros, which $((...)) would otherwise read as octal.
+case $QUEUE_GB in ''|*[!0-9]*) QUEUE_GB=7 ;; *) QUEUE_GB=$((10#$QUEUE_GB)) ;; esac
+[ "$QUEUE_GB" -eq 0 ] && QUEUE_GB=7
+# Orphan renderer cleanup — a killed run leaves chrome-headless-shell (Remotion's own
+# worker, never the user's browser) and ffmpeg squatting GBs of RAM, which starves the
+# free-RAM queue computation right below. Kill the shells outright; ffmpeg may be a
+# legitimate user encode, so warn and let the operator decide. A concurrently running
+# Remotion render shares this process name — confirm none is live before launching.
+if command -v powershell >/dev/null 2>&1; then
+  ORPHANS=$(powershell -NoProfile -Command "(Get-Process chrome-headless-shell -ErrorAction SilentlyContinue).Count" 2>/dev/null | tr -d '\r')
+  if [ -n "$ORPHANS" ] && [ "$ORPHANS" -gt 0 ] 2>/dev/null; then
+    powershell -NoProfile -Command "Get-Process chrome-headless-shell -ErrorAction SilentlyContinue | Stop-Process -Force" 2>/dev/null \
+      && echo "cleaned $ORPHANS orphan chrome-headless-shell process(es)" \
+      || echo "warning: orphan cleanup failed" >&2
+  fi
+  FFCNT=$(powershell -NoProfile -Command "(Get-Process ffmpeg -ErrorAction SilentlyContinue).Count" 2>/dev/null | tr -d '\r')
+  if [ -n "$FFCNT" ] && [ "$FFCNT" -gt 0 ] 2>/dev/null; then
+    echo "WARNING: $FFCNT ffmpeg process(es) running — leftover encodes squat RAM; kill them (or confirm they are wanted) if free RAM looks low"
+  fi
+fi
 if [ "$QUEUES" = "auto" ]; then
   CORES=$(python -c "import os; print(os.cpu_count() or 4)")
   FREE_GB=$(python -c "import ctypes" 2>/dev/null && powershell -NoProfile -Command "[math]::Round((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory/1MB)" 2>/dev/null || echo 8)
-  QUEUES=$(( CORES / 4 )); [ $((FREE_GB / 7)) -lt $QUEUES ] && QUEUES=$((FREE_GB / 7))
+  QUEUES=$(( CORES / 4 )); [ $((FREE_GB / QUEUE_GB)) -lt $QUEUES ] && QUEUES=$((FREE_GB / QUEUE_GB))
   [ "$QUEUES" -lt 1 ] && QUEUES=1
   [ "$QUEUES" -gt "$SEGMENTS" ] && QUEUES=$SEGMENTS
   echo "auto queues: $QUEUES (cores=$CORES free_ram=${FREE_GB}GB)"

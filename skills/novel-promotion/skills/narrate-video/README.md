@@ -41,7 +41,7 @@ npx skills add ChHsiching/narrate-video-skill
 
 ## Prerequisites
 
-- [IndexTTS2](https://github.com/index-tts/index-tts) installed locally (~4 GB models). On first run the skill searches common locations and asks once if not found, then caches the path.
+- [IndexTTS2](https://github.com/index-tts/index-tts) v2.5 installed locally (~10 GB models). On first run the skill searches common locations and asks once if not found, holding the path in memory for that run only.
 - [uv](https://docs.astral.sh/uv/) for running Python in the IndexTTS2 env.
 - [ffmpeg](https://ffmpeg.org/) on PATH.
 

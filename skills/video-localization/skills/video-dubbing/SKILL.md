@@ -84,7 +84,7 @@ The pipeline is implemented in `scripts/full_dub.py`, which takes a `synth|timel
 There are **two** Python environments in play, and confusing them is the failure mode this step exists to prevent:
 
 - **cook's environment** (system Python or `~/.venvs/video-tools/`) — where the `cook` CLI lives, with whisperX/yt-dlp/torch for the subtitle pipeline.
-- **IndexTTS2's environment** (`~/Git/index-tts/.venv`) — a separate venv holding `indextts`, `torch` (CPU build), and `demucs`. These deps are heavy and isolated on purpose; do **not** try to install them into cook's environment.
+- **IndexTTS2's environment** (`~/Git/index-tts/.venv`) — a separate venv holding `indextts`, `torch`, `demucs`, and `whisperx` (the dub pipeline adds the last two on top of upstream's lockfile). These deps are heavy and isolated on purpose; do **not** try to install them into cook's environment.
 
 cook runs each dub stage as a subprocess under the IndexTTS2 venv via `--python`, so `from indextts import ...` resolves there. **Every `cook dub` command in this skill takes `--python <indextts-venv>/Scripts/python.exe`.** Resolve the venv path once (default `~/Git/index-tts/.venv`) and reuse it for the whole run.
 
@@ -92,12 +92,12 @@ cook runs each dub stage as a subprocess under the IndexTTS2 venv via `--python`
 
 ```
 <cook-venv>/Scripts/cook doctor                                    # whisperX/yt-dlp/ffmpeg
-<indextts-venv>/Scripts/python -c "import indextts, demucs; print('ok')"   # indextts + demucs
+<indextts-venv>/Scripts/python -c "from indextts.infer_v2_5 import IndexTTS2; import demucs, whisperx; print('ok')"   # indextts (v2.5) + demucs + whisperx
 ```
 
 **0b. Single-thread constraint.** IndexTTS2 must run single-threaded (`OMP_NUM_THREADS=1`), or it produces garbage audio. `full_dub.py` sets this internally before importing torch, so you don't need to export it yourself — just don't run two dub stages in parallel.
 
-Done when cook's doctor reports whisperX/yt-dlp/ffmpeg installed, the IndexTTS2 venv imports `indextts` + `demucs`, and you know the absolute path to `<indextts-venv>/Scripts/python.exe` to pass as `--python`.
+Done when cook's doctor reports whisperX/yt-dlp/ffmpeg installed, the IndexTTS2 venv imports `indextts` (v2.5) + `demucs` + `whisperx`, and you know the absolute path to `<indextts-venv>/Scripts/python.exe` to pass as `--python`.
 
 ### Step 1 — Separate vocals from the raw video
 
@@ -327,4 +327,4 @@ Done when the video plays clean end-to-end. The run is not done until this passe
 
 The following details are pushed out of this file because they're consulted on demand:
 
-- **[REFERENCE.md](REFERENCE.md)** — IndexTTS2 install (the single-thread constraint, the garbage-audio bug, model download), the full term-retention list (which English terms stay English, which become Chinese, and the on-screen-content rule with examples), the **timeline.json schema** (segment fields and invariants for tools that edit it), Demucs raw commands, the bi-directional re-timing math (ratio formula, the string-of-pearls construction proof), `minterpolate` parameter tuning and its artifact alternatives (blend mode, no-interpolation), the IndexTTS2 vs VoxCPM2 vs 豆包 API comparison (why IndexTTS2 won), and the Chinese-dub quality self-check (洋腔 detection, term-translation audit).
+- **[REFERENCE.md](REFERENCE.md)** — IndexTTS2 install (the single-thread constraint, the garbage-audio bug, model download, the demucs/whisperx-on-top-of-upstream step), the **v2.5 API differences** (silent garbage via `infer_v2`, `use_bf16`/`use_qwen_emo`, required `lang`), the full term-retention list (which English terms stay English, which become Chinese, and the on-screen-content rule with examples), the **timeline.json schema** (segment fields and invariants for tools that edit it), Demucs raw commands, the bi-directional re-timing math (ratio formula, the string-of-pearls construction proof), `minterpolate` parameter tuning and its artifact alternatives (blend mode, no-interpolation), the IndexTTS2 vs VoxCPM2 vs 豆包 API comparison (why IndexTTS2 won), and the Chinese-dub quality self-check (洋腔 detection, term-translation audit).

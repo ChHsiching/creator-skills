@@ -31,7 +31,7 @@ torch.set_num_threads(1)
 torch.set_num_interop_threads(1)
 
 # NOW import indextts
-from indextts.infer_v2 import IndexTTS2
+from indextts.infer_v2_5 import IndexTTS2
 ```
 
 **Order matters**: the env vars must be set before any numerical library imports. Setting them after torch loads has no effect. Every script in `scripts/` does this at the top.
@@ -40,18 +40,40 @@ Cost: RTF jumps from ~5 (multi-thread, broken) to ~30-36 (single-thread, correct
 
 ### Install
 
+Upstream requires [uv](https://docs.astral.sh/uv/) for a reliable install (`pip install -U uv`); the full guide is the upstream README.
+
 ```bash
 git clone https://github.com/index-tts/index-tts.git ~/Git/index-tts
 cd ~/Git/index-tts
-python -m venv .venv
-.venv/Scripts/pip install -r requirements.txt
-# models land in checkpoints/ — first inference downloads them (~3GB)
+uv sync           # plain sync installs core inference; extras (deepspeed/flash-attn) are only guaranteed with a CUDA toolkit — see upstream README's Windows note
+uv tool install "huggingface-hub"
+hf download IndexTeam/IndexTTS-2.5 --local-dir=checkpoints   # ~5.2GB
 ```
 
-Verify single-thread inference works:
+Auxiliary models (w2v-bert-2.0 at ~4.4GB dominates, plus BigVGAN, CAMPPlus, MaskGCT) auto-download into `checkpoints/hf_cache/` on first run. Upgrading from v2 instead? Copy the old `checkpoints/hf_cache/` over — no re-download needed.
+
+The dub pipeline also needs `demucs` (vocal separation) and `whisperx` (reference extraction) — neither is in upstream's lockfile:
+
 ```bash
-.venv/Scripts/python -c "import os; os.environ['OMP_NUM_THREADS']='1'; import torch; torch.set_num_threads(1); from indextts.infer_v2 import IndexTTS2; print('OK')"
+uv pip install demucs whisperx
 ```
+
+A later `uv sync` prunes them again (`uv sync` is exact) — and so does any `uv run` in this repo, which exact-syncs implicitly (narrate-video's launches do). Reinstall after re-syncing.
+
+Verify the venv resolves the v2.5 module:
+```bash
+.venv/Scripts/python -c "from indextts.infer_v2_5 import IndexTTS2; import demucs, whisperx; print('OK')"
+```
+
+### v2.5 API — the differences that break v2.0 code
+
+Loading v2.5 checkpoints through the old `infer_v2` module produces garbage audio with **no error** — the failure is silent. Every synth script in this skill therefore uses:
+
+- `from indextts.infer_v2_5 import IndexTTS2` (not `infer_v2`)
+- init: `use_bf16=` replaces `use_fp16=`; `use_qwen_emo=False` skips the emotion model — only `use_emo_text=True` needs it, and that hard-requires `use_qwen_emo=True` at init (RuntimeError otherwise)
+- `infer(...)` takes a required `lang` argument (`"zh"` for this pipeline; case-insensitive)
+- output WAVs are properly scaled now — the old install clipped every output to 0dBFS (fixed upstream in #773); peaks vary per cue (measured -2 to -5dBFS), with no internal loudness normalization. A `_segments/` cache from a pre-upgrade run mixes 0dBFS v2.0-era cues with quieter v2.5 cues — delete it when resuming.
+- v2.5 tokenizes via tiktoken; `infer_v2_5` never reads `bpe.model` (the file still ships in the checkpoint download)
 
 ### Reference audio requirements
 

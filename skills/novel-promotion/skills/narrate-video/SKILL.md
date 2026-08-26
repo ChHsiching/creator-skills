@@ -39,19 +39,19 @@ If either is missing, stop and tell the user exactly what's missing and where to
 
 ## Step 1 — Resolve the IndexTTS2 installation
 
-IndexTTS2 is a heavy install (~4 GB) and not shipped with this skill. The skill reuses an existing install — like the `video-subtitle` skill's venv-reuse approach: **probe, never persist a custom config file into the user's home directory.** The skill writes no dotfiles anywhere global.
+IndexTTS2 is a heavy install (~10 GB: ~5GB checkpoints + ~5GB auto-downloaded aux models, plus the venv) and not shipped with this skill. The skill reuses an existing install — like the `video-subtitle` skill's venv-reuse approach: **probe, never persist a custom config file into the user's home directory.** The skill writes no dotfiles anywhere global.
 
-Check these candidates in order, use the first whose `checkpoints/config.yaml` exists:
+Check these candidates in order, use the first that is a **v2.5 install** — the probe is `<dir>/indextts/infer_v2_5.py` existing (a `checkpoints/config.yaml` alone is not enough: v2.0-only installs pass it but this skill's script imports `infer_v2_5` and would crash):
 
 1. The `NARRATE_INDEXTTS_DIR` environment variable
 2. `<workspace>/index-tts` (sibling of the video subdirectory's parent — common if the user keeps a single install next to their project)
-3. Common locations under the user's home: `~/Git/novel-promotion/index-tts`, `~/index-tts`, `~/Documents/index-tts`
+3. Common locations under the user's home: `~/Git/index-tts` (the shared install the video-dubbing skill also uses), `~/index-tts`, `~/Documents/index-tts`. `~/Git/novel-promotion/index-tts` is a v2.0-only vendored copy — never use it.
 
 If none is found, ask the user: "IndexTTS2 在哪？给我它的安装目录（里面应该有 checkpoints/ 文件夹）。" Hold the answer in memory for the rest of this run only — do not write it to a file. (If the user wants to skip the question on future runs, they set `NARRATE_INDEXTTS_DIR` themselves — the skill never touches their shell config either.)
 
 Also resolve `uv`: run `uv --version`. If missing, install it (`powershell -c "irm https://astral.sh/uv/install.ps1 | iex"` on Windows; the curl one-liner on macOS/Linux).
 
-**Done when** you can name a directory containing `checkpoints/config.yaml` and `uv --version` works.
+**Done when** you can name a directory containing `indextts/infer_v2_5.py` (and `checkpoints/config.yaml`) and `uv --version` works.
 
 ## Step 2 — Configure the narration voice, speed, and emotion
 
@@ -107,7 +107,7 @@ PYTHONPATH="<indextts-dir>" nohup uv run python <skill>/scripts/gen_audio.py \
 
 Sleep 15s, then confirm the log file has output and the process is still alive (`Get-Process python` on Windows; `ps aux | grep python` elsewhere). That's enough — a process alive with a growing log at 15s outlives the shell timeout.
 
-The script caches per-sentence audio in `output/_segments/`, so re-runs after a parameter change only re-synthesize what changed.
+The script caches per-sentence audio in `output/_segments/`, so re-runs after a parameter change only re-synthesize what changed. The cache is not engine-aware: a `_segments/` from before the IndexTTS 2.5 upgrade mixes 0dBFS v2.0-era cues with quieter v2.5 cues (peaks now -2 to -5dBFS) — delete it when resuming an old project.
 
 **Done when** `<video-subdir>/output/audio.wav` and `<video-subdir>/output/audio.srt` both exist and `audio.srt` has exactly one cue per full sentence in the script (count them).
 
