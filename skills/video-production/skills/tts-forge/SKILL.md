@@ -15,7 +15,7 @@ Present the trade, let them pick:
 |---|---|---|---|
 | MiniMax (`mmx-cli`) | Chinese narration, natural prosody | ~¥0.2-0.35 / 1k chars (list price — verify at platform.minimaxi.com) | `mmx` CLI + login (`--region=cn`) |
 | OpenAI TTS | quick start, most agents already hold a key | per-char, cheap | `OPENAI_API_KEY` |
-| edge-tts | free, offline-ish drafts | free | local binary |
+| edge-tts | free, offline-ish drafts | free | local binary + wrapper (see Provider quick reference) |
 | ElevenLabs / Azure / Google | premium English/brand voices | subscription | provider portal |
 
 Two provider-specific traps worth stating to the user up front: MiniMax authentication is not enough — the account needs balance topped up; and the default MiniMax voice is unpleasant enough that voice selection (Step 2) is mandatory.
@@ -44,14 +44,20 @@ One script, two renderings:
 
 Skipping the split produces mispronounced product names and comically read-out symbols. Write both, show the user the narration script, get a nod, then synthesize.
 
+Engine input traps (MiniMax/mmx, all measured): CamelCase multiword names insert pauses — feed the engine lower-case space-separated (`deepseek v4 flash vision exp`), display text unchanged; hyphenated two-word names (`V4-Flash`) read fine — leave them; decimal points get swallowed (`4.8` reads "four-eight") — spell the decimal in the narration text; underscores swallow letters — space-separate (`vision max n token`); rare words split wrong — respell through the engine's pronunciation flag (`Chartography/Chartogra-phy`). (Video subtitle tracks have their own cue-punctuation rules — the video skill's narration reference owns those.)
+
+New proper nouns get a probe: synthesize one sentence containing the word, the user ear-checks it, and only then the full run — a wrong reading discovered after a full synthesis run is a full re-spend.
+
 Done when: the user has approved the narration script.
 
 ## Step 4 — Synthesize incrementally
 
-Run `scripts/synthesize.sh <segments.tsv> <out-dir> --provider <p> --voice <id>` — it loops segments serially with skip-existing resume, reports per-run cost, assembles `narration.mp3`, and its `--force` flag states the full re-spend cost before invalidating a voice change. The TSV carries `id	text` per segment.
+Run `scripts/synthesize.sh <segments.tsv> <out-dir> --provider <p> --voice <id>` — it loops segments serially with skip-existing resume, reports per-run cost, assembles `narration.mp3`, and its `--force` flag quotes the full re-spend cost before wiping every cached segment (required after a voice change). The TSV carries `id	text` per segment.
+
+Speed trims after synthesis use `ffmpeg atempo` on the existing audio (atempo=0.97 = 3% slower) — never re-synthesize to change pace; back up originals before any destructive audio op. Duration tables written by a partial run cover only the segments that ran — after any non-full pass, re-measure every segment before computing timelines from durations (hit three-plus times on one production).
+
+Done when: the script reports `SYNTH_DONE` with zero failed segments and `narration.mp3` plays every segment end-to-end.
 
 ## Provider quick reference
 
 Any provider beyond the built-ins (ElevenLabs, edge-tts, Azure, Google) becomes one small wrapper exposing the same three commands: audition, synthesize-segment, skip-existing.
-
-Done when: the script reports `SYNTH_DONE` with zero failed segments and `narration.mp3` plays every segment end-to-end.

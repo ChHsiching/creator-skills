@@ -53,10 +53,12 @@ if [ "$QUEUES" = "auto" ]; then
   FREE_GB=$(python -c "import ctypes" 2>/dev/null && powershell -NoProfile -Command "[math]::Round((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory/1MB)" 2>/dev/null || echo 8)
   QUEUES=$(( CORES / 4 )); [ $((FREE_GB / QUEUE_GB)) -lt $QUEUES ] && QUEUES=$((FREE_GB / QUEUE_GB))
   [ "$QUEUES" -lt 1 ] && QUEUES=1
-  [ "$QUEUES" -gt "$SEGMENTS" ] && QUEUES=$SEGMENTS
   echo "auto queues: $QUEUES (cores=$CORES free_ram=${FREE_GB}GB)"
 fi
 SEGMENTS=$(( SEGMENTS < TOTAL ? SEGMENTS : TOTAL ))
+# clamp queues on every path (auto and explicit): N > segments starves q0 —
+# awk's NR%q never yields 0 when NR <= SEGMENTS < QUEUES, so q0.list never exists.
+[ "$QUEUES" -gt "$SEGMENTS" ] && QUEUES=$SEGMENTS
 SEG=$(( (TOTAL + SEGMENTS - 1) / SEGMENTS ))
 OUT="${OUT//\\//}"; ENTRY="${ENTRY//\\//}"
 DIR="$(dirname "$OUT")/segments"

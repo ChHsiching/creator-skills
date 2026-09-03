@@ -46,10 +46,22 @@ def main():
 
     blocks = parse_blocks(open(args.input, encoding="utf-8").read())
     result = []
+    def zh_line(l: str) -> bool:
+        # any CJK at all counts — long English brand names inside Chinese lines
+        # ("DeepSeek-V4-Flash-Vision-Exp 正式发布") must not flip the verdict;
+        # the file contract (zh block above en block) makes position the tiebreaker
+        return bool(re.search(r"[\u4e00-\u9fff]", l))
+
     for s, e, body in blocks:
         if args.bilingual and len(body) >= 2:
-            if re.search(r"[\u4e00-\u9fff]", body[0]):
-                zh, en = body[0], body[1]
+            if zh_line(body[0]):
+                # leading Chinese lines (Chinese may wrap), then the English remainder;
+                # both sides joined on spaces. A hard body[0]/body[1] split silently
+                # dropped body[2:] whenever the English translation wrapped.
+                i = 0
+                while i < len(body) and zh_line(body[i]):
+                    i += 1
+                zh, en = " ".join(body[:i]), " ".join(body[i:]) or None
             else:
                 zh, en = None, " ".join(body)
             result.append({"s": s, "e": e, "zh": zh, "en": en})
@@ -71,6 +83,8 @@ def main():
         print(f"with zh: {zh_n}  with en: {en_n}")
         if zh_n == 0 or en_n == 0:
             sys.exit("WARNING: one language is entirely missing — check the input pairing")
+        if zh_n < len(result):
+            print(f"note: {len(result) - zh_n} cue(s) have no zh — en-only cue, or pairing off; check")
 
 
 if __name__ == "__main__":

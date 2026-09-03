@@ -20,11 +20,10 @@ No other skill required — it applies to any Remotion project. Needs `ffmpeg` (
 
 ## Use
 
-Load it before choosing 4K render settings, or when a 4K render comes out rough:
-
 > 渲 4K 出来小字全是毛刺，怎么办
+> 我要渲个 4K 成片，直接 scale=2 行吗
 
-Load it before choosing 4K render settings, or after a rough render comes out. It picks the path that fits your project (size-parameterized theme → B; existing scale=2 master → C or A re-render) and gives exact commands — "我要渲个 4K 成片，直接 scale=2 行吗" lands on the decision block, not a post-mortem.
+Load it before choosing 4K render settings, or after a rough render comes out. It picks the path that fits your project (size-parameterized theme → B; existing scale=2 master → C or A re-render) and gives exact commands — the second question above lands on the decision block, not a post-mortem.
 
 ## License
 

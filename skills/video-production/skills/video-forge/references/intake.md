@@ -22,6 +22,8 @@ Two phrasing rules earned the hard way:
 - **Form options must be derived from the material, every time.** A fixed menu fits last project and betrays this one. Read the transcript/article first, then design 2-3 genuinely different forms it supports, presented with ASCII previews.
 - **Use the structured question tool with previews.** Users choose between concrete variants decisively and answer open prose vaguely. When they answer a form question with extra requirements ("very good, but make it dense, assume beginners"), those rider requirements are intake gold — record them in the brief.
 
+For original-narration videos (topic in, no transcript), category 4 settles the narration register too (`references/narration.md`).
+
 ## The director brief
 
 One page, handed to remotion-video-director as it enters its Phase 2. Fields:
@@ -36,6 +38,7 @@ FORM       chosen visualization form + why the material supports it
 PLATFORMS  target platforms; resolution/fps; required variants (e.g. bili triple card)
 FACTS      verified key numbers/claims for on-screen use; UNVERIFIED list if any
 ASSETS     speaker avatars/photos, source images, logo — what exists, what's cleared
+CRAFT      binding craft constraints from references/visuals.md (type floors, SVG symbols, band design, line-width math) — hand to the director with the brief
 AUDIO      original track / TTS plan (tts-forge output) / none — for TTS, the timing authority settled at intake (audio-first default or design-first)
 ```
 

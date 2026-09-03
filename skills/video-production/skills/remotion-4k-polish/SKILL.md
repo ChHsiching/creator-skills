@@ -19,6 +19,8 @@ sizes hardcoded, deadline, platform re-encodes      → Path A
 a scale=2 master already exists                     → Path C (know its ceiling), else A/B
 ```
 
+(Inside a pipeline that reserves the upscale decision for the user, present Path A vs B rather than auto-routing.)
+
 ## Path B — 4K-native composition (quality path)
 
 Design the composition at 3840×2160 with every size constant doubled, render with `--scale=1`. deviceScaleFactor stays 1, so Chromium's standard rasterization (hinting, proper AA) runs at 4K resolution: true 4K sharpness with smooth edges.
@@ -40,7 +42,7 @@ Text renders at its best and the upscale is uniform — soft but clean, and plat
 When a scale=2 master already exists or is unavoidable:
 
 - **Line-weight compensation**: hairlines nominally keep their relative thickness across resolutions, but the 2× downsample to typical 1080p viewing dilutes 1px-scale lines below perceptual weight (they shimmer or break after platform re-encode). Double hairline widths in the 4K master (a `LN(w) → SCALE>=2 ? w*2 : w` helper in the theme) so the 1080p viewing path sees the designed weight.
-- **Same-color stroke for serif/thin faces**: a fixed ~0.6px CSS-px `WebkitTextStroke` (≈1.2 device px at scale 2) on serif/hairline text restores weight the no-hinting path loses; scale it up only if your largest stroked face still reads thin.
+- **Same-color stroke for serif/thin faces**: a ~0.15px CSS-px same-color `WebkitTextStroke` restores the weight the no-hinting path loses — five measured rounds on a real 4K master: 0.5px reads too bold, 0.25px is visually identical to 0.15px (subpixel rounding), so 0.15px is the value. Pair with crf ≤14 so the encoder doesn't shave the restored weight; scale up only if your largest stroked face still reads thin.
 - Ceiling: strokes are vector edges layered on an unhinted raster — they restore weight but do not restore smoothness. If the master still reads jagged at viewing size, move to Path A or B.
 
 ## Integrity checks (any path)

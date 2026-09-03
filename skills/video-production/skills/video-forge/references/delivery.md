@@ -6,27 +6,31 @@ Mechanics for the delivery gates, timing, verification, audio, covers, platform 
 
 Render one still per distinct layout/asset state (not per scene), present as a labeled sheet, and get the user's explicit go. The gate clears on the user's approval — record it; silence is not approval, and G2's render command is not issued before it.
 
-**Preflight** — self-check the stills before the sheet reaches the user; every line traces to a real rejection:
+**Preflight** — self-check the stills before the sheet reaches the user; every line traces to a real rejection. Deeper visual craft (type floors, SVG symbols, line-width math, subtitle band, icons/numbers, stills discipline, component pitfalls) lives in `references/visuals.md` — read it with this list:
 
 - *Thumbnail read*: inspect at phone-thumbnail scale and grow any type that stops reading there. Full-size inspection overstates legibility — viewers meet the thumbnail first.
 - *System vocabulary*: extend the established visual system with its own vocabulary (rules, tints, type). Borrowings from other archetypes — card boxes, badges, panels — are a different language; route them through the storyboard for approval instead of slipping them into stills.
 - *Optical center*: a centered hero element sits at ~42-45% frame height; the geometric middle reads low.
-- *Explicit line breaks*: element and label text breaks where its meaning breaks — hand-set lines, never auto-wrap, which splits labels mid-thought.
-- *Attribution tags*: sources ride as small tags beside the claim (官方口径 / 社区结论 style), stated as speech or deleted; parentheticals and narrator self-talk ("下一屏揭晓", "详见X章") go — the sequence itself navigates.
+- *Explicit line breaks*: hand-set where meaning breaks, never auto-wrap (width math and the mechanism ban: references/visuals.md).
+- *Attribution tags*: sources ride as small tags beside the claim (官方口径 / 社区结论 style), stated as speech or deleted; parentheticals and narrator self-talk ("下一屏揭晓", "详见X章") go — the sequence itself navigates. Tags are reserved for genuinely third-party data: officially checkable facts state directly, and tagging them as third-party is a downgrade.
 - *Self-evident terms*: a term lifted from source material (a demo's scene name, artifact jargon) carries one phrase of setup; proper nouns use the source's display name, never the slug/ID.
-- *SVG icons*: arrows and marks are hand-drawn SVG — glyph stand-ins (→ ↓ ▸ emoji) drag in font-metric surprises. After any icon swap, measure alignment pixel-wise (color-cluster the icon ink against its anchor text's ink; inline-SVG baseline behavior is not what you'd guess).
+- *SVG icons*: arrows and marks are hand-drawn SVG — glyph stand-ins (→ ↓ ▸ emoji) drag in font-metric surprises. After any icon swap, measure alignment pixel-wise (color-cluster the icon ink against its anchor text's ink; inline-SVG baseline behavior is not what you'd guess). The full symbol principle lives in references/visuals.md.
 - *Fill voids with content*: an empty region earns another fact, never wider margins.
 - *Machine acceptance, every still*: an edge-clipping scan (all content pixels within frame bounds) catches overflow the eye forgives. Render each still at two frames for self-check — the settled frame, plus one from ~20% into its scene's entry animation — and read the early one: a settled-only pass hides animation-order bugs such as elements already visible at frame 0. The user sheet stays the settled frames.
 
 ## G2 — cheap full render with audio
 
-Render the full video at 1080p **with the final audio mix in place** — G3a's loudness check reads the real mix, so a silent or scratch-audio draft makes the whole of G3 meaningless. (1080p rather than 540p because G3b's diff threshold and G3c's vision reads are calibrated at full pixels; 540p halves the diffs and blurs the reads. Use 540p only for long videos where 1080p is too slow — see the scale note below.) Two checks, in order:
+Render the full video at 1080p **with the final audio mix in place** — G3a's loudness check reads the real mix, so a silent or scratch-audio draft makes the whole of G3 meaningless. (1080p rather than 540p because G3b's diff threshold and G3c's vision reads are calibrated at full pixels; 540p halves the diffs and blurs the reads. Use 540p only for long videos where 1080p is too slow — see the scale note below.)
+
+The mix itself is one master audio file (voice + music bed) rendered inside the composition's own `<Audio>` timeline: build it from measured segments (strip per-segment leading silence, place by exact delay), then render picture and sound in the same pass. Splitting audio out into ffmpeg and muxing it back drifts — per-source `<Audio volume>` inside Remotion has been measured not to attenuate, and mp3 priming adds ±100-430 ms per segment, so the more you patch it the further it slides.
+
+Two checks, in order:
 
 1. **Spec check** (machine):
    ```
    ffprobe -v error -select_streams v:0 -show_entries stream=width,height,avg_frame_rate -show_entries format=duration -of default=noprint_wrappers=1 <video>
    ```
-   Dimensions, fps, and duration match the intake answers and the generated timing table.
+   fps and duration match the intake answers and the generated timing table (duration here is a fast proxy — the frame-exact count check runs at G4). Dimensions match THIS render's own target (the 1080p/540p draft), never the intake resolution — the intake-set dimensions are what G4's platform variants check.
 2. **User check**: the user watches and approves content and timing.
 
 (540p via scale 0.5 is ~2× faster than 1080p — per-frame overhead dominates. 360p via scale is not an option: a decimal third of 1080 lands on a fractional height and the renderer rejects non-integer dimensions — stick to 0.5/0.75.)
@@ -83,7 +87,7 @@ for p in sys.argv[1:]:
 ```
 Existence + size per the intake platform list; which ratios and the design rules live in the Covers section below.
 
-**Platform variants** — every variant the intake platform list requires is rendered and passes the same G2 spec check (dimensions/fps/duration against its target).
+**Platform variants** — every variant the intake platform list requires is rendered and passes the same G2 spec check (fps/duration against the timing table; dimensions against the intake-set target for that variant — this is where the 4K/1080p answers get enforced).
 
 **Publish copy** — section presence and every length rule, by `len()` against each platform's counting rule; the limits live in the publish-copy section below (titles within limits, three description versions present, four chapter versions present).
 
@@ -100,27 +104,34 @@ When narration is TTS and intake settled the timing authority as audio-first (th
 3. Derive timing from measured durations — **by running a script over the segment files, never by hand arithmetic** (hand-computed cumulative starts have produced real off-by-hundreds errors). The derivation, once implemented:
    - scene length = `ceil((segment_duration + pad) × fps)`, pad ≈ 0.7s breathing room
    - scene starts are cumulative; the last segment's end is the composition length
-   - caption spans per scene: detect speech pauses (`ffmpeg silencedetect` at −32dB, ≥0.16s), place each cue boundary at the pause nearest its character-proportional estimate (fall back to the estimate when no pause within 0.7s), convert to frames
-4. Scenes and captions consume the generated tables. Proportional rescaling of caption times desyncs against real speech pacing — re-anchor to pauses instead.
+   - caption timing when the narration text is known (the usual TTS case): **whisperx forced alignment** against the real audio — wav2vec2 aligns known text word-accurately; anchor each cue to its speech onset (`silence_end − 150 ms`; cutting at the silence start runs a whole pause late). ASR word timestamps (faster-whisper) are estimates that drift a second or more — never align from them. Any script edit after alignment invalidates the alignment: re-run it and everything derived from it
+   - caption spans with no alignable text: detect speech pauses (`ffmpeg silencedetect` at −32dB, ≥0.16s), place each cue boundary at the pause nearest its character-proportional estimate (fall back to the estimate when no pause within 0.7s), convert to frames
+4. Scenes and captions consume the generated tables. Proportional rescaling of caption times desyncs against real speech pacing — re-anchor to aligned words, or to pauses when there is no text.
+5. When alignment drifts, diagnose on the dry VO track, never the mixed cut (energy detection finds the bed, not the voice — one wrong "-1.6 s constant offset" conclusion came from exactly this); calibrate silence thresholds on pure VO conservatively; keep silence-search windows narrow enough to exclude neighboring segments; verify every window parameter actually passed to the aligner.
 
 ## Audio mix baseline (G3a targets)
 
 bilibili transcodes without loudness normalization — what you upload is what viewers hear; YouTube pulls down toward about −14 LUFS and never boosts. Targets for narration-led video:
 
-- Integrated loudness: −16 LUFS ±1
-- True peak: ≤ −1 dBTP
-- Music bed: 12-18 dB under the voice; the high end when clarity matters
+- Integrated loudness: −14 LUFS ±1 for narration-led video (ear-verified in production; matches YouTube's pull-down target; music-only videos set their own)
+- True peak: ≤ −1 dBTP (ebur128 is the authority — loudnorm's tables overstate)
+- Music bed: 12-18 dB under the voice; the high end when clarity matters. Both extremes have failed before — deeper beds read as inaudible, a 5-7 dB bed drew viewer complaints of too-loud music — so audition the actual mix's 45s segment before rendering; the user re-tunes per video.
 - Verify with an ebur128 three-window read: whole file, a speech window, a music-only window
+
+**Reaching the targets**: condition each VO segment before mixing — measure (ebur128), gain to −14 LUFS/segment, limit; alimiter eats 1-2 dB of applied gain, so iterate measure→gain→remeasure (≤3 rounds). Music selection is its own decision gate: search a library for THIS video (a previous episode's track is not a shortcut), audition 3-5 candidates over the same ~30s segment at matched level, the user picks; normalize the chosen track to −16 LUFS before applying bed curves (skipping it biases the bed ~2.5 dB), and derive the bed-curve coefficients from the target bed level — narrative / data-dense / closing tiers, closing highest — never hardcode them.
 
 ## Final-render strategy (every G4 render)
 
 **The segmented driver is the default for finals, whatever the length** — a bare single-process render is the skip-this-step failure mode (one measured run: 58-minute single-process ETA vs 15 minutes through the driver). **Maximize parallelism to the actual hardware — measure, then compute, never accept a default queue count:**
 
-1. Probe: logical CPU count and FREE RAM (not total — a "cleaned" machine frees twice the queues). Killed renders squat GBs of RAM in orphan ffmpeg/chrome-headless processes before the probe runs — `render_segments.sh` kills the chrome-headless shells at startup and warns on ffmpeg; kill the ffmpeg ones by hand when free RAM looks low (a hand-driven run cleans both by hand first). The shell kill also takes down a concurrently running Remotion render's workers — confirm none is live before launching. Script cleanup and the RAM probe are PowerShell steps; elsewhere, clean and measure by hand.
-2. Calibrate on the first render: an instance saturates ~3-4 cores regardless of `--concurrency` (architectural), but its RAM scales with output resolution (~6-8GB at 4K, less at 1080p) — measure one running instance, then compute `queues = min(floor(cores/4), floor(free_ram_gb / measured_instance_gb), remaining_segment_count)`. Two remaining segments means two queues; a third lane has nothing to render. **Pass the computed value as `--queues N`** — the script's auto mode assumes a 4K-sized 7 GB/queue (`--queue-gb` overrides) and floors the division, so on a busy machine it lands on 1 queue and quietly forfeits the parallelism (the measured 15-minute run above needed `--queues 3`).
+1. Probe: logical CPU count and FREE RAM (not total — a "cleaned" machine frees twice the queues; on Windows read commit-charge headroom, not physical free — physical free understated the available queues 8× on a real machine). Killed renders squat GBs of RAM in orphan ffmpeg/chrome-headless processes before the probe runs — `render_segments.sh` kills the chrome-headless shells at startup and warns on ffmpeg; kill the ffmpeg ones by hand when free RAM looks low (a hand-driven run cleans both by hand first). The shell kill also takes down a concurrently running Remotion render's workers — confirm none is live before launching. Script cleanup and the RAM probe are PowerShell steps; elsewhere, clean and measure by hand.
+2. Calibrate on the first render: an instance saturates ~3-4 cores regardless of `--concurrency` (architectural), but its RAM scales with output resolution (~6-8GB at 4K, less at 1080p) — measure one running instance, then compute `queues = min(floor(cores/4), floor(free_ram_gb / measured_instance_gb), remaining_segment_count)`. Two remaining segments means two queues; a third lane has nothing to render. **Pass the computed value as `--queues N`** — the script's auto mode assumes a 4K-sized 7 GB/queue (`--queue-gb` overrides) and floors the division, so on a busy machine it lands on 1 queue and quietly forfeits the parallelism (the measured 15-minute run above needed `--queues 3`). The formula has a measured ceiling: CPU oversubscription bites before RAM on dense machines — 12 queues crashed segments where 6 held on 32 cores, so ~6 is the practical cap; stability beats the formula.
 
-- **Segmented rendering**: split into N frame-exact segments (each an independent encode), render sequentially or in 2-3 parallel instance queues, concat with stream copy. Zero quality loss: same encoder settings per segment, no re-encode at the join.
-- **Resume**: segments already on disk are skipped — a crashed run costs only the in-flight segment.
+- **Bundle verification around every render that follows code changes**: clear `node_modules/.cache` first (a stale webpack cache renders the old bundle — the tell is the frame count disagreeing with the timing table), run `npx remotion compositions` and confirm frames equal the timing table's totalFrames, and after rendering read one frame off a changed page. `tsc` passing is not verification.
+
+- **Segmented rendering**: split into N frame-exact segments (each an independent encode), render sequentially or in 2-3 parallel instance queues, concat with stream copy. Zero quality loss: same encoder settings per segment, no re-encode at the join. Scripts needing a total duration read it from the generated timing table — a TOTAL hardcoded from the previous timeline shipped audio 8 s longer than the video.
+- **Frame-exact acceptance**: after concat, `ffprobe -v error -count_frames -select_streams v:0 -show_entries stream=nb_read_frames -of default=noprint_wrappers=1` equals the timing table's totalFrames. `format=duration` carries the audio track and can overrun the video silently — it is never the frame-count authority.
+- **Resume**: segments already on disk are skipped — a crashed run costs only the in-flight segment; which is exactly why a timeline change clears `out/segments/` first (delete by explicit list), or resume splices old-timeline segments into the new cut. One driver instance at a time (step 1's shell-kill warning).
 - `render_segments.sh` gates concat on the integrity check itself; a hand-driven segment run needs `scripts/check_segments.sh` first.
 
 ## Windows render environment
@@ -135,20 +146,22 @@ bilibili transcodes without loudness normalization — what you upload is what v
 - The video ends when the music ends — fade the audio over the outro and cut. Silent tails and fade-to-black tails both cost completion rate: end on the card, hard cut.
 - Sign-off card: ≤2s total, its animation done within ~1s, then straight to the end.
 - Closing copy states a takeaway or next action; begging CTAs ("评论区说" / "comment below") read as filler — engagement prompts belong in the pinned comment.
-- Platform variant cards (e.g. bilibili triple-action) render as a **composition props variant** inserted before the outro — the variant joins the timeline with native transitions, and both platform versions build from one codebase. (File-level concat of a separately rendered tail is the fallback: it needs aligned streams — e.g. a silent audio track on the tail — and re-checking the join.) A triple-action card keeps the same budget: icons pop in fast and asynchronously within ~1s, hard end at ≤2.5s.
+- Platform variant cards (e.g. bilibili triple-action) render as a **composition props variant** inserted before the outro — the variant joins the timeline with native transitions, and both platform versions build from one codebase. (File-level concat of a separately rendered tail is the fallback: it needs aligned streams — e.g. a silent audio track on the tail — and re-checking the join.) A triple-action card gets its own budget: icons pop in fast and asynchronously within ~1s, hard end at ≤2.5s.
 
 ## Covers
 
 - Explore before finalizing: produce 3-4 covers with genuinely different visual concepts — different metaphor and information organization. Rearranging the same elements, or reusing video components (a scene's terminal card, the header bar), yields variations of one cover rather than options; the user picks from real alternatives, then the chosen concept gets built out in every required ratio.
 - One cover per ratio the intake platform list implies — typically 16:9 (1920×1080) and 4:3 (1440×1080) for bilibili/xiaohongshu; a YouTube-only job needs no 4:3. **A 4:3 cover is its own layout** — vertical space runs out differently, so design it from scratch (move footnotes, re-center blocks, re-fit type); scaling a 16:9 layout down produces wrapped titles and clipped cards.
 - Large type only — everything a thumbnail must communicate at ≥48px at 1080-scale. Small text on covers is invisible in feeds; write nothing you wouldn't read at 200px wide.
+- The cover's largest word is a category/hook word the thumbnail reads (记忆插件 — not the generic 插件); category detail never demoted into the small line.
+- Action words on a cover match what was actually done — no 实测 (tested) unless it was tested.
 - Chinese title should be sans/bold (serif CJK reads thin at cover sizes) and at least as prominent as any English title — viewers read the language they know to decide what the video is.
 - **Verify by reading, not by metric**: downsampled-pixel brightness checks are blind to thin/colored text (green prompt lines, gray footnotes — all below threshold). Downscale the full cover to ASCII art and read it; this catches wraps, overlaps, and missing elements that metrics pass.
 - The cover is an independent design — a frame from the video is not a cover.
 
 ## Publish copy
 
-Per-platform deliverable, written after the video is final (facts on screen are then frozen). Full spec below — this file owns the spec.
+Per-platform deliverable, written after the video is final (facts on screen are then frozen); it lands on disk as `upload.md` — one file carrying the per-platform paste blocks below. Dates in publish copy are absolute (`2026-09-03`, never 昨天/今天) — production-to-publish spans days, so relative dates are stale on arrival. Full spec below — this file owns the spec.
 
 **Plain text inside paste blocks.** Platforms render markdown literally: `**bold**` shows as asterisks, `-` markers show as hyphens. The upload.md file may use markdown for its own sections; the fenced paste-block content is plain text with line breaks, list items as `·` or `1. 2. 3.`.
 
@@ -159,6 +172,8 @@ Per-platform deliverable, written after the video is final (facts on screen are 
 - **YouTube**: may carry "(双语字幕)" or the English title variant.
 
 The ~30-char targets are style targets, not platform caps — the bilibili cap is far higher (historically 80). Verify the live cap when a title wants to run long; never assume the shorter.
+
+**Title workflow (production-proven)**: read the channel's existing top-performing titles in the browser first; dispatch ≥3 fresh subagents, each drafting 20 candidates in its own direction (data-driven / impact / plain descriptive), each seeded with those channel titles; hand the full list to the user to pick. A title states what the video covers plus a concrete number — rejected shapes, each on a real production: questions; hooks that withhold the number; format words (指南 / 全解 / 拆解); self-description ("我去读了…"); any promise the video does not deeply cover.
 
 **Description — three versions:**
 
@@ -180,4 +195,4 @@ The ~30-char targets are style targets, not platform caps — the bilibili cap i
 
 Timestamps come from the actual delivered timeline (an audio-first run reads the generated timing table). Tone throughout: translator, not promoter.
 
-**Verify before handover**: title lengths, chapter counts and name lengths, description char counts — each against its platform's counting rule, by `len()`.
+**Verify before handover**: title lengths, chapter counts and name lengths, description char counts — each against its platform's counting rule, by `len()`. Re-pull every fast-moving number the description shows (stars, downloads, usage counts) before upload; when the video curates third-party items, run the curation recall audit (materials.md) at the same time.

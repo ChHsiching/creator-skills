@@ -1,6 +1,6 @@
 # video-forge
 
-Turn any raw material — a URL, article, image set, podcast episode, or video file — into a finished, publishable video.
+Turn any raw material — a URL, article, image set, podcast episode, or video file — or a topic to narrate from scratch — into a finished, publishable video.
 
 `video-forge` is the **router**: it runs the intake interview (scope, subtitles, visualization form, audience red lines, platforms, voiceover + timing authority), processes your material until it's build-ready (transcription with multi-round review gates, fact verification, translation), then hands a complete brief to [`remotion-video-director`](https://github.com/BayramAnnakov/remotion-video-director), which owns the creative build. Delivery comes back under `video-forge`'s playbook as four advance-blocking gates — your stills approval, a spec-checked render with audio, machine-checked content gates (loudness / blank-scene sweep / first-frame check / neutral vision reads), then the 4K final with covers, platform variants, and publish copy.
 
@@ -8,7 +8,7 @@ The workflow was forged on real productions (a 59-minute podcast → 4K60 annota
 
 ## Install
 
-Skills — install all six. video-forge dispatches to five of them by name at runtime; the Remotion series is the build engine's knowledge base (installed regardless of the engine's optional stance toward it, per its own docs):
+Skills — install all six. video-forge dispatches to four of them by name at runtime; the Remotion series is the build engine's knowledge base (installed regardless of the engine's optional stance toward it, per its own docs):
 
 ```bash
 # dependencies (third-party)
@@ -22,7 +22,7 @@ npx skills add ChHsiching/remotion-4k-polish           # required for 4K finals 
 npx skills add ChHsiching/tts-forge                    # required when silent material needs a voice
 ```
 
-Tools (binaries, probed at runtime): `ffmpeg` on PATH; the [`cook`](https://github.com/ChHsiching/video-cook) CLI (`pip install video-cook[all]`) for AV transcription — whisperx-direct works without it, you just manage backgrounding yourself. Voiceover is provider-routed at runtime: MiniMax needs the `mmx` CLI (login + topped-up balance), OpenAI needs an API key — tts-forge collects whichever is needed when a voice is requested.
+Tools (binaries, probed at runtime): `ffmpeg` on PATH; the [`cook`](https://github.com/ChHsiching/video-cook) CLI (`pip install "video-cook[all]"`) for AV transcription — whisperx-direct works without it, you just manage backgrounding yourself. Voiceover is provider-routed at runtime: MiniMax needs the `mmx` CLI (login + topped-up balance), OpenAI needs an API key — tts-forge collects whichever is needed when a voice is requested.
 
 ## Use
 

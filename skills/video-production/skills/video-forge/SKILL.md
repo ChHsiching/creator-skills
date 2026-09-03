@@ -1,6 +1,6 @@
 ---
 name: video-forge
-description: Turn source material — a URL, article, image set, podcast, or video file — into a finished, publishable video. Use when the user provides material and wants it turned into a video (做视频 / 视频化 / 可视化), or asks what turning content into a video involves. If the user explicitly invokes remotion-video-director by name, or wants from-scratch motion design with no source material, defer to it and skip this skill.
+description: Turn source material — a URL, article, image set, podcast, or video file — or just a topic for an original narrated video (news briefing, explainer) — into a finished, publishable video. Use when the user provides material or a topic and wants it turned into a video (做视频 / 视频化 / 可视化), or asks what turning content into a video involves. If the user explicitly invokes remotion-video-director by name, or wants from-scratch motion design with no source material, defer to it and skip this skill.
 ---
 
 # video-forge
@@ -19,6 +19,23 @@ Every decision in this pipeline belongs to exactly one side:
 - **Shape is the director's** — creative direction, pacing, music, look, scene design: how the decided scope is executed. It asks these itself; pre-asking them in your interview steals its job and bores the user with duplicate questions.
 
 If the director probes scope anyway (e.g. duration constraints), answer from intake — never re-ask the user.
+
+## Hard lines
+
+Each earned by a real production failure; they bind every step:
+
+- Spending compute or money (full TTS synthesis, final renders) needs the user's explicit yes — "review it" authorizes review, not synthesis.
+- "4K" means a native 4K render; an upscale route is presented for a decision, never chosen silently.
+- Creative candidates (titles, copy, visual variants) reach the user in bulk batches for picking — one-at-a-time rounds burn their time.
+- A user-requested change or a reported defect triggers a scan of ALL same-class instances; scope is confirmed first (this one? every same-class one? every downstream sync it implies?).
+- Replicating a design reads its source and matches properties; rendered pixels are the fallback when source is unavailable.
+- Source edits use precise per-file matches and get read back — bulk regex/replace scripts can silently no-op while printing success. JSON may be edited structurally.
+- Source material and docs are read end-to-end before producing; searching locates, it never replaces reading.
+- Reports state exactly what changed plus the current full artifact state; failures quote the raw error. Technical decisions are explained in plain language before asking.
+- Push/publish actions show the diff and wait for approval.
+- Files are deleted by explicit, verified list — wildcards and whole-directory rm are banned.
+- Shell commands and file writes use absolute paths — the tool cwd resets between calls.
+- Viewer/public factual questions get answered after verification (search or subagent), never from memory.
 
 ## Step 0 — Probe dependencies
 
@@ -42,8 +59,9 @@ Dispatch by what the user handed you, then read `references/materials.md` before
 | Audio / video file | transcription pipeline |
 | URL (page / article / post) | fetch pipeline |
 | Images | asset inventory (processing per materials.md) |
+| Topic / research notes (nothing to transcribe) | record the narration path — script is authored after intake and gated at Step 3 (`references/narration.md`) |
 
-Done when: a usable content source exists on disk (transcript, article text, or asset inventory) plus source metadata (author, URL, title — where the source has any) for attribution.
+Done when: a usable content source exists on disk (transcript, article text, or asset inventory) plus source metadata (author, URL, title — where the source has any) for attribution — or the material is a topic, in which case Step 1 only records the narration path (the content source is the script authored after intake, gated at Step 3).
 
 ## Step 2 — Intake interview
 
@@ -53,9 +71,9 @@ Read `references/intake.md` before interviewing — it carries the per-category 
 
 ## Step 3 — Material to build-ready
 
-Three gates between raw material and the director handoff — **terminology**, **AI-flavor**, **fact verification** — with their protocols single-homed in `references/materials.md`. Scale to the material: a 10-cue short needs one full pass per gate, not subagent loops.
+Videos that narrate original content (news briefings, explainers — no transcript to process) author their script under `references/narration.md` first; the script is the material and passes these gates like one. Three gates between raw material and the director handoff — **terminology**, **AI-flavor**, **fact verification** — with their protocols single-homed in `references/materials.md`; bilingual subtitles get their translation produced and checked under the terminology gate.
 
-Read `references/materials.md` for the gate protocols. Done when: every gate has a zero-defect pass and timestamps still match the source byte-for-byte.
+Read `references/materials.md` for the gate protocols. Done when: every gate has a zero-defect pass and timestamps still match the source byte-for-byte (transcribed material; an authored narration script is its own source — its gates alone clear it).
 
 ## Step 4 — Director handoff
 
@@ -68,11 +86,11 @@ Done when: every brief field in the intake.md format is filled from intake and g
 These are defaults you do, not questions you ask. Delivery runs as **four named gates in order — the run does not advance past a gate until it clears** (fix, then re-run the full gate; spot-checking the fixed item is not a pass). Each gate's exact checks live in `references/delivery.md` — read it before delivering.
 
 - **G1 — stills approval**: every distinct layout/asset state as a labeled stills sheet; the user approves content and assets.
-- **G2 — cheap full render with audio** (1080p; 540p for long videos): spec check passes (ffprobe vs intake answers), then the user approves content and timing.
+- **G2 — cheap full render with audio** (1080p; 540p for long videos): spec check passes (ffprobe: fps/duration vs intake, dimensions vs this draft's own target — delivery.md), then the user approves content and timing.
 - **G3 — content gates on the cheap render**: audio mix within loudness targets (ebur128 three-window), blank-scene sweep clean (85%-frame pixel diff), first frame carries content, neutral-vision reads clean. All zero-defect.
-- **G4 — final render + artifacts**: 4K render through `scripts/render_segments.sh` (read `remotion-4k-polish` first for the 4K path), every platform variant rendered and spec-checked, covers verified per ratio, publish copy complete and length-checked, ending spot-checked, output directory holds deliverables only.
+- **G4 — final render + artifacts**: final render at the intake-set resolution (4K unless intake settled lower) through `scripts/render_segments.sh` (read `remotion-4k-polish` first for the 4K path), every platform variant rendered and spec-checked, covers verified per ratio, publish copy complete and length-checked, ending spot-checked, output directory holds deliverables only.
 
-Done when: G1–G4 have each cleared in order, ffprobe specs match the intake answers, and the ending frames of every variant have been spot-checked.
+Done when: G1–G4 have each cleared in order, the final variants' ffprobe specs match the intake answers, and the ending frames of every variant have been spot-checked.
 
 ## Bundled scripts
 
