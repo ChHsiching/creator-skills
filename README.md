@@ -63,7 +63,14 @@ To develop a skill, go to its source repository (linked from each skill director
 
 ## License
 
-[MIT](LICENSE) for this repository's scaffolding. Each vendored skill carries its source repository's license in its directory where the source repo has one.
+AGPL-3.0-only · Copyright (c) 2026 ChHsiching — see [LICENSE](LICENSE) — for this repository's scaffolding. Each vendored skill carries its source repository's license in its directory (all current source repos are AGPL-3.0-only).
+
+- Use (including internal commercial use), modification, and distribution are free. Distributing or offering as a network service requires derivative works to be open-sourced under AGPL-3.0.
+- Closed-source commercial use requires a separate commercial license: hsichingchang@gmail.com
+
+### Contribution Terms
+
+By submitting a PR, you agree to license your contribution under AGPL-3.0 and grant the maintainer the right to offer separate commercial licenses. Your contribution remains available to everyone under AGPL.
 
 ## Repo layout
 
