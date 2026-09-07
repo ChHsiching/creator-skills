@@ -1,13 +1,13 @@
 # Narration craft
 
-For videos that narrate original content (news briefings, explainers, voiced tool walkthroughs), the narration script IS the material: it is authored here, gated like any transcript, and frozen before synthesis. Series-locked choices (voice, register overrides) come from the user's own series notes where they keep them; this file carries the craft.
+For videos that narrate original content (news briefings, explainers, voiced tool walkthroughs), the narration script IS the material: it is authored here, gated like any transcript, and frozen before synthesis. Series-locked choices (voice, register overrides) come from the user's own series notes where they keep them; this file carries the craft. In a series continuation, the previous episode's delivered artifacts are the craft baseline — read them before authoring (script granularity, synthesis settings, scene source); a pattern re-invented from scratch re-fails the same way every episode.
 
 ## Two tracks, written together
 
 tts-forge defines the split; this file owns the transcription rules (subtitle tracks strip sentence-final punctuation — a video-side rule).
 
-- **Display track** (subtitles, on-screen cards) is the written transcription of the narration: spoken forms restored to canonical (`三百八十四` → `384`, `deepseek v4 flash vision exp` → `DeepSeek-V4-Flash-Vision-Exp`, "艾特" → `@`); commands, code, and versions verbatim (`pip install everos`, `rc.8`); sentence-final punctuation stripped (periods/commas/colons go, internal punctuation stays); over-length lines split at punctuation into more cues — never wrapped.
-- **Narration track** (what TTS reads) is the speakable text: numbers spelled; symbols spelled (`node -v` → "node 减 v"); abbreviations letter-spaced when that reads better; English words written as words, never transliterated; star counts read as stars ("一万两千五百 stars"), never 颗星; compact codes (`0731`, `v0.1.1`) get their full spoken form plus one context anchor — bare codes are jargon. New proper nouns get a pronunciation probe with the user's ear before any full run (probe protocol and engine-side input traps live in tts-forge).
+- **Display track** (subtitles, on-screen cards) is the written transcription of the narration: spoken forms restored to canonical (`三百八十四` → `384`, `deepseek v4 flash vision exp` → `DeepSeek-V4-Flash-Vision-Exp`, "星号" → `*`); commands, code, and versions verbatim (`pip install everos`, `rc.8`); sentence-final punctuation stripped (periods/commas/colons go, internal punctuation stays — parentheses never enter prose copy: the zero-parenthesis rule, visuals.md, owns them); over-length lines split at punctuation into more cues — never wrapped.
+- **Narration track** (what TTS reads) is the speakable text: numbers spelled; symbols spelled (`node -v` → "node 减 v"); abbreviation spacing (letter-spaced vs joined) is engine-generation behavior, measured per engine — the trap table lives in tts-forge; English words written as words, never transliterated; star counts read as stars ("一万两千五百 stars"), never 颗星, and fast-moving counts phrase floor-style ("已过六千九百", never "7000 不到") — a range expires day by day across a multi-day publish window while a floor stays true; compact codes (`0731`, `v0.1.1`) get their full spoken form plus one context anchor — bare codes are jargon. New proper nouns get a pronunciation probe with the user's ear before any full run (probe protocol and engine-side input traps live in tts-forge).
 
 ## Register
 
@@ -33,6 +33,9 @@ Pick the register at intake and hold it across the whole script. The production-
 - Product criticism states facts, not verdicts — "dsh 目前没有内置记忆功能", never "明显的短板" (a verdict reads as a hit-piece).
 - Audience-known facts are not news — the news is the delta (agents having memory generally isn't the story; THIS tool lacking it is).
 - Neutral vocabulary for investigative subjects (线索 / 印证 / 先例 / 谜面； not 嫌疑 / 惯犯 / 前科) unless the subject is an actual scandal.
+- Framings carry a source: a definition or analogy the official material never made — an IDE comparison for a tool that never claimed one — is deleted outright, not defended. The fact gate checks numbers and names; framings need this line to be caught.
+- Statistical and qualitative calibers of the same word stay separate — the registry's category total and the characterization of a hand-picked subset are two different claims; presenting them as one contradicts itself the moment anyone probes.
+- First mention gives the full name, then the abbreviation directly — no "简称 X" announcement sentence (pure filler).
 
 ## Density
 
@@ -40,11 +43,15 @@ Information-block count meets or beats the channel's previous video on the same 
 
 ## The edit cascade (any script change after synthesis)
 
-A text change is never one change. The full chain, every time: re-synthesize the changed cue (delete that segment's audio file so the resume-skip regenerates it — `--force` re-spends the whole run) → re-run forced alignment (timestamps/SRT/anchors rebuild) → re-derive the timing table (later scenes shift) → rebuild the master audio → clear `node_modules/.cache` and `out/segments/` (render-strategy rules, delivery.md) → re-render + frame-exact check → sync publish copy (chapters, numbers, wording) → sync the project's second script copy if it keeps one (a stale copy renders `relStart` of undefined). Scope is confirmed with the user BEFORE editing (Hard lines, SKILL.md).
+A text change is never one change. The full chain, every time: re-synthesize the changed cue (delete that segment's audio file so the resume-skip regenerates it — `--force` re-spends the whole run) → re-run forced alignment (timestamps/SRT/anchors rebuild) → re-derive the timing table (later scenes shift) → rebuild the master audio → clear `node_modules/.cache` and `out/segments/` (render-strategy rules, delivery.md) → re-render + frame-exact check → sync publish copy (chapters, numbers, wording) → update the verified-facts list entry (the pre-render re-verification, delivery.md, enumerates from it) → sync the project's second script copy if it keeps one (a stale copy renders `relStart` of undefined). Scope is confirmed with the user BEFORE editing (Hard lines, SKILL.md).
 
 ## Cue length
 
 Compute, never hardcode: `max chars = usable width ÷ font size` (CJK glyph width ≈ font size; Latin ≈ 0.6 × font size). The same font size fits different counts at different container widths. Over-length cues split at semantic points into more cues.
+
+## Audio defects after synthesis
+
+A pause, phrasing, or stress defect in synthesized audio has exactly two fixes: rewrite the line (the cascade above) or re-synthesize the same line unchanged. Cut/insert surgery on the audio file is not a third way — word-level timestamps are estimates, and surgery driven by them lands inside words and syllable gaps (one production shipped three consecutive surgery attempts, each breaking something new, before the whole approach was rejected by the ear; re-synthesizing the same script was the fix that held). Pace trims via atempo remain legitimate (tts-forge).
 
 ## Before the user sees the script
 

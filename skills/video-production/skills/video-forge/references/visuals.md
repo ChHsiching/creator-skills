@@ -1,6 +1,6 @@
 # Visual craft
 
-Companion depth to delivery.md's G1 preflight — read both at G1. The type floors, band design, line-width math, and component pitfalls here are construction-time rules: they ride the director brief at handoff, not just the review.
+Companion depth to delivery.md's G1 preflight — read both at G1. Sections here split two ways: construction-time craft — type, symbols, line-width, band, animation timing, card copy, icons and numbers, screenshot placement, component pitfalls — rides the director brief at handoff; stills discipline and design taste serve the review loop.
 
 ## Type and layout
 
@@ -25,6 +25,14 @@ Route by pipeline: transcribed AV material burns ASS (cook pipeline); original-n
 - **Rendered-in-picture band**: bottom whitespace reserved by layout (~70px; the machine-sweep target is zero stray ink in that zone), constructive zero overlap with content, hairline separator fading out at both ends, dark ~30px centered single-line text, no stroke/shadow, hard cue cuts. The band shares the background color — a black bar on a light frame is rejected.
 - **Burned ASS band** (cook pipeline): 220px bottom band, content never enters it; machine-sweep the band's 12% side margins for dark pixels, plus edge-clipping scans on the frame.
 
+## Animation timing
+
+- A group of labels or chips enters one per beat, in the order the narration names them — never the whole group at once.
+- The page's subject is the first thing that moves. An opening that animates only the header's small type for several beats reads as broken; a hero element enters centered and ascends to its resting place early, not late.
+- Entering elements make room: new content pushes existing content aside instead of overlapping it.
+- Late-arriving content gets dwell time — an element appearing near a page's end is never cut on the following beat. Anything meant to be read (a command) stays visible for at least its spoken duration; genuinely short-lived material enters earlier or gets its own page.
+- A page thinned by a re-split fails density: merge the content back into one page (upper half fades out as the lower rises) instead of shipping a sparse page — and re-check that the page's title still states its content plainly, not a stunt phrase.
+
 ## Icons, logos, GIFs
 
 - Icons map 1:1 to item semantics (storage → database, search → magnifier); the same icon repeated as decoration in one list is filler; a section header already carrying a mark leaves item-level icons empty. Small graphics ride the line they belong to (a flex slot), never their own row.
@@ -35,16 +43,29 @@ Route by pipeline: transcribed AV material burns ASS (cook pipeline); original-n
 
 One data file is the single exit for on-screen numbers; components never inline them. Formatting uses tiered floor truncation (kfmt-style), never `toFixed`. Fast-moving numbers (stars, downloads) carry as-of dates (rule: materials.md), and every data line names its platform ("HuggingFace 获赞 437" — never a bare "获赞 437"). Wording quoted from official material stays verbatim — abbreviating it ("西藏自驾游 PPT" → "定制游 PPT") is a rejection. OCR/vision-read numbers are UNVERIFIED until re-checked against a text source (materials.md). Roundup/recommendation closing cards carry each item's install command verbatim from its official README — never composed or shortened — plus its stars.
 
+## Card copy (designed screen text — cards, terminals, headlines)
+
+- Prose copy carries zero parentheses (syntax inside commands and code is exempt). A parenthetical becomes a · separator or a designed side label; the label of record for bare version numbers and recurring jargon is an **anchor tag** — a small marker beside the token stating what it is (rc.1 — 最新版; 0.17.1 — 上一稳定版; runtime 0.1.0 — 08-14 首发). Without anchors, viewers who don't track version numbers read a ledger. The tag never repeats what the adjacent text already says, and its visual style is free (hairline + small mono worked once; anything equivalent reads fine).
+- Every sentence keeps its subject. A compound sentence that drops its subjects reads as a riddle — split it into short sentences, each saying who does what. Flow diagrams carry a subject per step (who does what where → what it hands to whom → where it lands); "its interface? it who?" is the sound of this failing.
+- Screen text is not the frozen subtitle: after audio and subtitles freeze, card text that never entered the audio track can still be rewritten for clarity.
+- A terminal's side note states real information — how the command actually arrives ("随桌面版一起安装 · 官网下载") — never "一条命令配好" filler; when one is found, sweep the same class film-wide after presenting every instance, the fix scope, and the plan for the user's yes.
+- Visible text is plain text: backticks and markdown markers render literally.
+- Big-type titles use plain nouns. A spoken antithetical slogan that barely passed the ear becomes several times worse blown up as a screen headline — spoken lines are never reused as card headlines.
+
 ## Screenshots and images
 
 - Vision-read every candidate image before placement: what it actually shows, whether it stays legible at target size, and whether it matches the caption. Images that don't fit get their own page or phase — never squeezed to stamp size beside a list.
+- Screenshots of a repository are that repository's own original images — never externally downloaded substitutes, never the author's pre-cropped fragments (one cropped fragment cut characters in half; the project's docs carried the full-window capture that replaced it).
+- Within the space it gets, an image runs as large as it fits — display share is enlarged before it is shrunk (this is layout size, distinct from the resolution upscale below; one production enlarged seven placements rather than letterbox them).
+- No decorative matting: a border added to make edges look less clipped was rejected on sight — the original thin frame and shadow stay.
+- A defect the source image itself carries (a half-character at its edge) is fixed by scanning columns for a clean boundary and tightening the crop — not by shipping the defect.
 - Source narrower than 2× the display width gets upscaled first (LANCZOS ×2 + unsharp, radius=2, percent=90).
-- Capture mechanics (viewport zoom not CSS zoom, scrollbar crop, natural aspect, objectFit policy) are in materials.md's Screenshot capture; local assets load through `staticFile()` (http URLs excepted).
+- Capture and placement mechanics are in materials.md's Screenshot capture; local assets load through `staticFile()` (http URLs excepted).
 
 ## Stills discipline
 
 - Every scene renders entry + settled frames; both re-render after any scene-code change — mtime-compare `src/scenes/` against `out/stills/` catches stale sheets (one production shipped 13-minute-old entry frames).
-- Stills can't catch animation-order bugs — G1's two-frame self-check is the minimum; spot-check mid-animation frames before presenting the sheet.
+- Stills can't catch animation-order bugs — G1's two-frame self-check (delivery.md) is the minimum.
 - Occasional 30s still-render timeouts clear on retry; a burst of failures is usually the Google Fonts CDN being flaky — wait it out, don't rewrite code.
 - A vision pass is void after fixes — the fix itself introduces defects; changed scenes get re-reviewed.
 - Re-exporting stills deletes the previous sheet by explicit list first (never a wildcard; a contact-sheet build excludes its own output from its glob).
@@ -58,3 +79,5 @@ AI-template shapes are rejected: saturated fill blocks, rounded-rectangle stacks
 
 - A scene shell's content area needs `display: flex; flex-direction: column` — under a block container, children's `justifyContent: center` is dead code and sparse pages stack at the top with a void below.
 - Terminal/command blocks size to `fit-content` — a fixed width either clips the nowrap command or leaves a void beside it.
+- A `<Sequence>` defaults to `layout="absolute-fill"`: it wraps children in a full-frame absolutely-positioned box that escapes the outer layout — an embedded video placed this way covered the labels and notes beside it. Nesting media takes an explicit `layout="none"`, which leaves the Sequence timing-only and the child in the layout flow.
+- `OffthreadVideo`'s playhead follows the composition's clock, not the phase it sits in — a video meant to play from its own start inside a phase gets wrapped in its own `<Sequence>` to zero the clock, or it joins mid-play.

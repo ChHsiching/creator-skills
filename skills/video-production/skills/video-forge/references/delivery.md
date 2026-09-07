@@ -6,17 +6,17 @@ Mechanics for the delivery gates, timing, verification, audio, covers, platform 
 
 Render one still per distinct layout/asset state (not per scene), present as a labeled sheet, and get the user's explicit go. The gate clears on the user's approval — record it; silence is not approval, and G2's render command is not issued before it.
 
-**Preflight** — self-check the stills before the sheet reaches the user; every line traces to a real rejection. Deeper visual craft (type floors, SVG symbols, line-width math, subtitle band, icons/numbers, stills discipline, component pitfalls) lives in `references/visuals.md` — read it with this list:
+**Preflight** — self-check the stills before the sheet reaches the user; every line traces to a real rejection. Deeper visual craft lives in `references/visuals.md` — read it in full with this list:
 
 - *Thumbnail read*: inspect at phone-thumbnail scale and grow any type that stops reading there. Full-size inspection overstates legibility — viewers meet the thumbnail first.
 - *System vocabulary*: extend the established visual system with its own vocabulary (rules, tints, type). Borrowings from other archetypes — card boxes, badges, panels — are a different language; route them through the storyboard for approval instead of slipping them into stills.
 - *Optical center*: a centered hero element sits at ~42-45% frame height; the geometric middle reads low.
 - *Explicit line breaks*: hand-set where meaning breaks, never auto-wrap (width math and the mechanism ban: references/visuals.md).
-- *Attribution tags*: sources ride as small tags beside the claim (官方口径 / 社区结论 style), stated as speech or deleted; parentheticals and narrator self-talk ("下一屏揭晓", "详见X章") go — the sequence itself navigates. Tags are reserved for genuinely third-party data: officially checkable facts state directly, and tagging them as third-party is a downgrade.
+- *Attribution tags*: sources ride as small tags beside the claim (官方口径 / 社区结论 style), stated as speech or deleted; narrator self-talk ("下一屏揭晓", "详见X章") goes — the sequence itself navigates. Tags are reserved for genuinely third-party data: officially checkable facts state directly, and tagging them as third-party is a downgrade. Parentheticals of every kind are covered by the zero-parenthesis rule (references/visuals.md, Card copy).
 - *Self-evident terms*: a term lifted from source material (a demo's scene name, artifact jargon) carries one phrase of setup; proper nouns use the source's display name, never the slug/ID.
 - *SVG icons*: arrows and marks are hand-drawn SVG — glyph stand-ins (→ ↓ ▸ emoji) drag in font-metric surprises. After any icon swap, measure alignment pixel-wise (color-cluster the icon ink against its anchor text's ink; inline-SVG baseline behavior is not what you'd guess). The full symbol principle lives in references/visuals.md.
 - *Fill voids with content*: an empty region earns another fact, never wider margins.
-- *Machine acceptance, every still*: an edge-clipping scan (all content pixels within frame bounds) catches overflow the eye forgives. Render each still at two frames for self-check — the settled frame, plus one from ~20% into its scene's entry animation — and read the early one: a settled-only pass hides animation-order bugs such as elements already visible at frame 0. The user sheet stays the settled frames.
+- *Machine acceptance, every still*: an edge-clipping scan (all content pixels within frame bounds) catches overflow the eye forgives. Render each still at two frames for self-check — the settled frame, plus a mid-entrance frame computed from the scene's authored entrance schedule: a checkpoint where exactly the first k entrances have completed and the expected content is known (the expectation manifest — Vision review protocol below — names what belongs on screen there). A settled-only pass hides animation-order bugs such as elements already visible at frame 0; a blind-fraction frame reports not-yet-entered elements as missing (two false alarms in one production came from a percentage pick) — computing from the schedule avoids both failures. The user sheet stays the settled frames.
 
 ## G2 — cheap full render with audio
 
@@ -37,7 +37,7 @@ Two checks, in order:
 
 ## G3 — content gates on the cheap render
 
-All four run on the G2 file — content truth lives in the rendered file (a stale bundle renders stills fine while the video breaks, so stills alone never clear content). Fixes are cheapest here. Threshold heuristics lose to the pixel diff and neutral reads: textured or sparse layouts that defeat a brightness check get resolved by G3c, not by relaxing the gate.
+All four run on the G2 file — content truth lives in the rendered file (a stale bundle renders stills fine while the video breaks, so stills alone never clear content). Fixes are cheapest here. Threshold heuristics lose to the pixel diff and dual-axis reads: textured or sparse layouts that defeat a brightness check get resolved by G3c, not by relaxing the gate.
 
 **G3a — audio mix** (targets in the loudness section below):
 ```
@@ -70,9 +70,17 @@ python -c "from PIL import Image; import numpy as np; a = np.array(Image.open('f
 ```
 A near-uniform frame (std ≤ 2 on a flat-background theme) fails. A fade-in envelope on the first scene renders an all-background opening frame, which reads as "loading" on platforms — the first scene enters with no fade-in (a `fadeInFrames=0` branch on the dissolve component; when an envelope argument can be zero, guard the interpolate range's monotonicity — `[0, 0, …]` throws at render time, not at authoring).
 
-**G3c — neutral content reads**: vision-model reads of extracted frames use neutral prompts (describe what is present). A read fails when the description reports blank or black content, or content contradicting what the timing table places at that frame; it passes when the description names the scene's actual content. Deep-dark or sparse layouts that defeat G3b's threshold get resolved here, not by relaxing the gate.
+**G3c — dual-axis content reads**: vision reads run BOTH axes of the Vision review protocol below — the neutral axis describes what is present; the requirements axis diffs the frame against the manifest. A read fails when either axis reports blank or black content, or the requirements axis reports content contradicting what the timing table and manifest place at that frame; it passes when the neutral read names the scene's actual content and the requirements read reports zero diff against the manifest. Deep-dark or sparse layouts that defeat G3b's threshold get resolved here, not by relaxing the gate.
+
+## Vision review protocol (G1 stills and G3c reads)
+
+- The router writes a per-frame expectation manifest before any vision pass: the exact text, the numbers, the layout, and the banned states for each frame — one line per frame, e.g. `frame 0147 (mid-entrance, k=2 of 5) — text: "HuggingFace 获赞 437"; numbers: 437; layout: title + first 2 of 5 chips entered; banned: chips 3-5 visible, ink in the band zone`. The manifest reaches only the requirements axis; the user only final-judges.
+- Two axes run in parallel and cross-check: a requirements axis (diffs reality against that manifest, frame by frame, on LOCAL full-resolution files) and a neutral axis (describes what is actually there). One axis alone is steer-able — the manifest can lead the first, a leading question the second; where the two disagree, a pixel measurement or a zoomed re-read arbitrates, not a third opinion.
+- Contact-sheet audits are unreliable (a reviewer once "read" frames the sheet did not contain) — every frame is read at full size. The router itself does not call remote vision APIs on external URLs: signed URLs expire mid-pass and white bands get "read" as text; vision judgment goes through subagents on local files.
 
 ## G4 — final render + artifacts
+
+**Pre-render re-verification runs before the render command** — a final render is tens of minutes; discovering a stale claim after it is a wasted render. From THIS project's verified-facts list, enumerate every time-sensitive claim the video states: every fast-moving number (stars, installs, downloads) and every present-state assertion (which version is latest, what a feature supports today, a review status, a collection total, days since the last update). Re-verify each against its source now — recording and render sit days apart, and a structural change upstream (a new release, a flipped status) invalidates spoken claims, not just numbers. Where each change lands depends on the pipeline. On TTS narration, every changed claim updates in all three places — screen, narration, facts list — through the edit cascade (references/narration.md), cost quoted and approved first, reopening G2's user check and G3's content gates on the new cut (the user may explicitly waive). On transcribed material the speaker's voice cannot be re-recorded: subtitles and cards stay aligned with what the speaker actually said — handle the delta with an as-of restamp (materials.md) or a user ruling, never a silent subtitle edit that desyncs from the audio, and the facts list records the new value with its as-of date; a restamp or card change reopens the same gates, waivable the same way. On a voiceover-less video only screen and facts list move — no cascade, and a screen change reopens the same gates, waivable the same way. The re-verification is done when every enumerated claim has been re-checked and the delta list is reported (or confirmed empty) — re-pulling star counts alone is the documented failure (a version-pointer flip missed that way cost nine re-recorded segments in one production).
 
 Render final through the segmented driver — `scripts/render_segments.sh` (strategy in the Final-render section below; 4K path choice: read `remotion-4k-polish` first) — then each artifact's check:
 
@@ -89,7 +97,7 @@ Existence + size per the intake platform list; which ratios and the design rules
 
 **Platform variants** — every variant the intake platform list requires is rendered and passes the same G2 spec check (fps/duration against the timing table; dimensions against the intake-set target for that variant — this is where the 4K/1080p answers get enforced).
 
-**Publish copy** — section presence and every length rule, by `len()` against each platform's counting rule; the limits live in the publish-copy section below (titles within limits, three description versions present, four chapter versions present).
+**Publish copy** — section presence and every length rule, by `len()` against each platform's counting rule; the limits live in the publish-copy section below (titles within limits, every implied description version present, every implied chapter version present).
 
 **Ending** — extract the final frame and one ~3s before it (`ffmpeg -sseof -3 -i <video> -frames:v 1 before.png` then `ffmpeg -sseof -0.1 -i <video> -frames:v 1 final.png`); the final frame is the sign-off card (not black), and if the ~3s frame already shows the card, the card exceeds its budget (Ending section).
 
@@ -118,7 +126,11 @@ bilibili transcodes without loudness normalization — what you upload is what v
 - Music bed: 12-18 dB under the voice; the high end when clarity matters. Both extremes have failed before — deeper beds read as inaudible, a 5-7 dB bed drew viewer complaints of too-loud music — so audition the actual mix's 45s segment before rendering; the user re-tunes per video.
 - Verify with an ebur128 three-window read: whole file, a speech window, a music-only window
 
-**Reaching the targets**: condition each VO segment before mixing — measure (ebur128), gain to −14 LUFS/segment, limit; alimiter eats 1-2 dB of applied gain, so iterate measure→gain→remeasure (≤3 rounds). Music selection is its own decision gate: search a library for THIS video (a previous episode's track is not a shortcut), audition 3-5 candidates over the same ~30s segment at matched level, the user picks; normalize the chosen track to −16 LUFS before applying bed curves (skipping it biases the bed ~2.5 dB), and derive the bed-curve coefficients from the target bed level — narrative / data-dense / closing tiers, closing highest — never hardcode them.
+**Reaching the targets**: condition each VO segment before mixing — measure (ebur128), gain to −14 LUFS/segment, limit; alimiter eats 1-2 dB of applied gain, so iterate measure→gain→remeasure (≤3 rounds). Normalize a freshly chosen track to −16 LUFS before applying bed curves (skipping it biases the bed ~2.5 dB), and derive the bed-curve coefficients from the target bed level — narrative / data-dense / closing tiers, closing highest — never hardcode them.
+
+## Music selection (its own decision gate)
+
+Write the episode's music identity first (read the director's music guide when one is installed) — searching before the identity exists produces genre-adjacent noise. Audition 3-5 candidates — the music alone, one file per candidate, over the same ~30s segment at matched level, never pre-mixed with voice or the cut; the user picks. Searching a library for THIS video stands (a previous episode's track is not a shortcut) — unless the user tells you to reuse the previous episode's track (calling it the series' signature, or just for this episode): then skip the identity write, the search, and the audition, verify the audio is identical to that episode's (hash the candidate against the composition-referenced music file inside that episode's project — the source of record; any other copy must match it byte-for-byte, else the reuse aborts: fall back to the fresh-search path and tell the user), and copy that episode's usage (volume envelope, fades) rather than re-deriving it (the copied usage already sits at its normalized level — the normalize-and-derive steps above belong to fresh searches).
 
 ## Final-render strategy (every G4 render)
 
@@ -136,7 +148,7 @@ bilibili transcodes without loudness normalization — what you upload is what v
 
 ## Windows render environment
 
-- A killed render leaves node/chrome-headless-shell/ffmpeg processes alive — the same residue the final-render strategy's step 1 cleans for the RAM probe, plus node instances that lock partial outputs (`rm` reports "Device or resource busy"). For the locked-output case kill by command line — `Get-CimInstance Win32_Process` filtered on `remotion`, `Stop-Process` each — then delete partials.
+- A killed render leaves node/chrome-headless-shell/ffmpeg processes alive — the same residue the final-render strategy's step 1 cleans for the RAM probe, plus node instances that lock partial outputs (`rm` reports "Device or resource busy"). For the locked-output case kill by command line — `Get-CimInstance Win32_Process` filtered on `remotion`, `Stop-Process` each — then delete partials. Staggered workers can hatch AFTER a cleanup sweep (a killed run once spawned 144 chrome shells post-cleanup): kill, wait ~60s, confirm zero across two checks, then re-render.
 - Render commands run bare, no pipes: `… | tail` eats the real exit code and a failed render reports success.
 - Pass `--port` explicitly — the renderer's internal server defaults to 3000, which collides with WSL port forwarding on dev machines.
 - Keep `public/` lean: narration WAVs and screenshots pile into tens of MB and slow every bundle copy. On an intermittent copy timeout, retry once before diagnosing.
@@ -173,9 +185,17 @@ Per-platform deliverable, written after the video is final (facts on screen are 
 
 The ~30-char targets are style targets, not platform caps — the bilibili cap is far higher (historically 80). Verify the live cap when a title wants to run long; never assume the shorter.
 
-**Title workflow (production-proven)**: read the channel's existing top-performing titles in the browser first; dispatch ≥3 fresh subagents, each drafting 20 candidates in its own direction (data-driven / impact / plain descriptive), each seeded with those channel titles; hand the full list to the user to pick. A title states what the video covers plus a concrete number — rejected shapes, each on a real production: questions; hooks that withhold the number; format words (指南 / 全解 / 拆解); self-description ("我去读了…"); any promise the video does not deeply cover.
+**Title methodology** (packaging methodology from the YouTube repos — sergebulaev/youtube-skills and AgriciDaniel/claude-youtube — adapted across platforms):
 
-**Description — three versions:**
+- **Pick the job first**: browse-first (lead with curiosity and emotion) or search-first (lead with the exact query phrase — how-tos and comparisons lean search). Most videos want browse.
+- **Shortlist 1-2 formulas that fit the real payoff**, then write 3-5 titles across them: curiosity-gap (a surprising result whose mechanism stays hidden) · number/listicle (a finite, scannable payoff) · how-I outcome (first-person result with a number and timeframe) · mistake (a costly thing the viewer is getting wrong) · transformation (a before/after arc) · versus (two named options in tension; search-friendly) · third-party success story (a named actor who built a big number from zero).
+- **Each candidate**: click-deciding words first — mobile truncates around the first 40-50 characters, so what follows is invisible on phones; one specific number where the claim allows (numbers lift CTR ~20-30%); curiosity always paired with a concrete noun, never pure mystery; complements the thumbnail instead of repeating its words; at most one em dash (a colon reads cleaner), no ALL CAPS, 0-1 emoji. On YouTube, 70-100 characters outperform shorter titles by 10-14% — carry the same front-load principle into the CJK platform specs above rather than the raw count.
+- **Humanizer pass on every candidate**: replace AI-marker vocabulary, break stacked or hollow rule-of-three structures, strip reveal bridges ("Here's what nobody tells you") and sincerity framing ("real talk").
+- **Honesty is structural, not a virtue claim**: platforms auto-check title and thumbnail claims against the actual content and suppress mismatches without human review — a title may not promise more than the first 30 seconds deliver.
+- **Refused outright**: clickbait the video doesn't honor; keyword stuffing.
+- Present variants with char counts and formula tags; the user picks or calls another round. One title is not a recommendation. Shape examples (CJK, front-loaded): 「dsh 更新速览与工作台插件生态：六款方案与选型建议」— number/listicle · 「开源 8 天拿下 27k 星，它做对了什么」— curiosity-gap.
+
+**Description — every version the intake platform list implies:**
 
 1. **Full (bilibili/YouTube)**, five parts in order:
    - 定调句 (1-2 sentences): author + what they did + one-sentence value — "X 用 Y 做了 Z", never "来自 X 的讲解".
@@ -183,16 +203,28 @@ The ~30-char targets are style targets, not platform caps — the bilibili cap i
    - 关键内容 (`·` list): key beats as "label: content" pairs — a scannable index, easier than a flat list.
    - 来源 (`·` list): `来源：` / `· 作者：` / `· 原视频：` / `· 网站/仓库：` / `· 时间：<video date, e.g. 2026.8.23>` — structured, never inline; the date line goes last.
    - 结尾话术 (verbatim): `字幕：AI 辅助转录 + 翻译并经人工校对。如有不准确之处，欢迎指出。` — for original-narration videos (no translation), the honest adaptation: `字幕与口播：AI 辅助制作并经人工校对。如有不准确之处，欢迎指出。`
-2. **xiaohongshu pinned comment (≤300 chars, every character counted as the platform counts)**: the first three paragraphs compressed plus the closing note. Leave out 看点, 关键内容, and links — they eat the budget. Verify with `len()`; compress until it fits.
+2. **xiaohongshu pinned comment (≤300 chars, every character counted as the platform counts)**: the opening line (定调句) and the closing note, compressed. Leave out 看点, 关键内容, and links — they eat the budget. Verify with `len()`; compress until it fits.
 3. **xiaohongshu body (≤100 chars)**: one sentence — who published what, the core topic, why watch. No metadata ("双语字幕" belongs in the pinned comment). Verify with `len()`.
 
-**Chapters — four versions, all produced (a hard checklist, not a menu):**
+**Chapters — every version the intake platform list implies, all produced (a hard checklist, not a menu):**
 
 1. bilibili platform field (≤10): `HH:MM:SS` + name ≤11 chars
 2. xiaohongshu platform field (≤15): same format
-3. YouTube platform field: same format
-4. Pinned-comment full list: `HH:MM:SS` + one descriptive sentence per chapter, no length limit
+3. YouTube platform field: `HH:MM:SS` + name, no length cap — the unit's full proper name per the naming rule below
+4. Long-form pinned comment (bilibili/YouTube): full chapter list — `HH:MM:SS` + one descriptive sentence per chapter, no length limit (which genres get which form: rule below)
 
 Timestamps come from the actual delivered timeline (an audio-first run reads the generated timing table). Tone throughout: translator, not promoter.
+
+Chapters cut along the video's subject units — whatever the viewer would jump to. A tool roundup cuts per tool (per group when there are too many); other genres cut at their own natural units; the production scene grid is never the cut. A chapter's timestamp is the exact moment the narration FIRST introduces that unit, not the scene boundary (on a voiceover-less video, the moment the unit first appears on screen). Naming runs as two systems that never mix: length-limited platform fields use functional words with a source (zero coinage — viewers parse them cold), while unlimited placements (the YouTube chapter field, long-form pinned comments) use the unit's full proper name — a project's full name in a roundup, the topic's full name elsewhere. One pair, literally: `00:12:03 任务板` (length-limited field — a sourced functional word) vs `00:12:03 dashi-taskboard：任务板` (unlimited placement — the unit's full name). A long-form pinned comment (bilibili/YouTube class) is genre-dependent: a tool roundup carries the jump skeleton (jump-to-content line · 省流 block · one line per "timestamp unit-name URL" · a status footer); other genres post the full-chapter-list format above. Jump skeleton, literally:
+
+```
+正片从 02:08 开始
+省流：六款工作台插件，三款能直接装，两款还在排队
+02:08 dashi-taskboard：任务板 https://github.com/<org>/<repo>
+07:26 dsh-genui：生成式 UI https://github.com/<org>/<repo>
+插件雷达：侧边栏 待定 · 生成式 UI 可用
+```
+
+The xiaohongshu pinned comment stays its own ≤300-char compressed form (description part 2 above).
 
 **Verify before handover**: title lengths, chapter counts and name lengths, description char counts — each against its platform's counting rule, by `len()`. Re-pull every fast-moving number the description shows (stars, downloads, usage counts) before upload; when the video curates third-party items, run the curation recall audit (materials.md) at the same time.

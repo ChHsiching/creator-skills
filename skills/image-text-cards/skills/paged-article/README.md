@@ -76,3 +76,16 @@ paged-article-skill/
 ├── scripts/                  ← scaffold.sh, html-to-pdf.sh, source-to-markdown scripts
 └── assets/scaffold-template/ ← Vite+React+TS workspace template
 ```
+
+## License
+
+AGPL-3.0-only · Copyright (c) 2026 ChHsiching — see [LICENSE](LICENSE).
+
+- Use (including internal commercial use), modification, and distribution are free. Distributing it or offering it as a network service requires derivative works to be open-sourced under AGPL-3.0.
+- Closed-source commercial use requires a separate commercial license: hsichingchang@gmail.com
+
+Embeds [beautiful-article](https://github.com/ConardLi/garden-skills) (MIT, © ConardLi) — see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
+
+### Contribution Terms
+
+By submitting a PR, you agree to license your contribution under AGPL-3.0 and grant the maintainer the right to offer separate commercial licenses. Your contribution remains available to everyone under AGPL.

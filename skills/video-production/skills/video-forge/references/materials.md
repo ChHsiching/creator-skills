@@ -23,6 +23,10 @@ cook and whisperx live in ONE persistent shared Python environment — installed
 - Run a research subagent on the topic to collect verifiable facts, numbers, and proper-noun spellings BEFORE any text goes on screen. Anything the research cannot confirm from an authoritative source is UNVERIFIED — surface it to the user, never silently render it.
 - When the video is itself a curation of third-party items (a roundup, a top-N, an ecosystem guide), the candidate pool is built by the Curation discovery protocol below — run it before the pool freezes.
 
+## Repository research (any video that describes a project)
+
+A project whose features the video will describe gets its repository cloned and read — whatever the material type: a one-line release note or a README cannot characterize a feature (one production built two false narratives from a single release-note line; the real design surfaced only in a shallow clone of the source). High-risk spots this catches: README counts gone stale (8 tabs that were 7; "30+" components that were 45), companion projects that are actually third-party with zero in-repo references, leaderboard claims carrying their own unverified scope, and sourceless anecdotes (an author's "sophomore year" with no provenance anywhere) — each is corrected or cut before it reaches the script.
+
 ## Curation discovery (roundup / recommendation material)
 
 When the video curates a set of third-party items (plugins, tools, models, repos), the candidate pool is a discovery product, not a copy of the seed article. Two failure classes, both from a real production: a 92k-star project excluded on a README-only read (its integration lived in `docs/agent-adapters.md`, and one wrongly-excluded taskboard shipped a standard plugin in `integrations/` while both of its READMEs never mentioned it) — and a memory product that never entered the pool at all (its official integration blog was the top web hit for the category, but discovery had only searched registries).
@@ -38,7 +42,7 @@ When the video curates a set of third-party items (plugins, tools, models, repos
 
 **Exclusion correctness — a "no integration" verdict is a negative claim; prove it wider than you would an admission:**
 
-- Four checks, all of them, before writing "zero integration": ① repo full text — README is just the entry point (also `docs/`, `integrations/`, package manifests); ② the project's own docs site (agent-integration pages); ③ package-registry reverse lookup under the org's scope; ④ community-registry full-text search for the project name.
+- Four checks, all of them, before writing "zero integration": ① repo full text AND page metadata — README is just the entry point (also `docs/`, `integrations/`, package manifests, and the repo's About/description/topics: one project declared ecosystem support in its About's first line and tagged it in topics while both its READMEs stayed silent — "the README never mentions it" is not a verdict); ② the project's own docs site (agent-integration pages); ③ package-registry reverse lookup under the org's scope; ④ community-registry full-text search for the project name.
 - Auto-aggregated stores (topic scrapers) prove nothing — listed ≠ integrated.
 - High stars × target category = mandatory deep pass through all four checks; those are exactly the projects a shallow read wrongly excludes.
 - Log every exclusion in the research notes with the same rigor as an admission (checks performed, search terms, date) — verdicts must be overturnable later.
@@ -55,6 +59,17 @@ When the video curates a set of third-party items (plugins, tools, models, repos
 - **Crop the scrollbar strip** off the right edge — it appears at any zoom once the page scrolls.
 - **Place at natural aspect**: an image enters a card at full width and its own height. `objectFit: cover` zooms and crops silently — background use only, after the user has seen the crop.
 - Manual user-set browser zoom stays the fallback when the user wants specific framing.
+- Automated-browser screenshots lie about the viewport: a browser window at 1920 with device scale 0.75 reports a 2560-wide CSS viewport, and every viewport or element capture is silently wrong. Reliable capture forces an EXPLICIT scale — 1 for 1:1 captures, or the zoom's design DPR via the viewport emulation above for magnified captures — and never inherits the OS device scale (headless Chrome: `chrome-headless-shell --headless --force-device-scale-factor=1 --window-size=1920,1080 --screenshot`; Remotion's bundled shell lives under `node_modules/.remotion/chrome-headless-shell/`).
+
+## Demo video as evidence
+
+When the subject has an official demo video and the claim is about motion or interaction:
+
+- Embed the video itself; a static frame cannot prove a dynamic claim. Long demos get trimmed to their first half rather than replaced by stills — and if the video is too blurry to use, its screenshots are equally unusable (clarity is processed, not dodged).
+- Trims are lossless and verified so: compare the pixel data of same-timestamp frames between source and cut before use.
+- The clarity chain is diagnose → treat → re-verify: edge softness gets light denoise (hqdn3d) plus sharpening (CAS ~0.55), parameters blind-tested then re-checked at a second point; AI upscaling is reserved — it waxes UI text.
+- Strip the audio track physically (ffmpeg stream extraction), never via a runtime volume property — volume props have failed silently in production and are no way to mute an embedded track.
+- When a vision review must judge this material, hand it the video itself to watch through — self-sampled stills (one frame every few seconds) miss the moments that matter.
 
 ## Gate mechanics (all gates)
 
@@ -62,7 +77,7 @@ When the video curates a set of third-party items (plugins, tools, models, repos
 - **Alignment blind spot**: count-only verifiers (n cues = n lines) pass while every line is off by one. Always also compare timestamps byte-for-byte against the source SRT, and spot-read EN[N]↔ZH[N] pairs at intervals.
 - **Silence hallucinations**: a tiny-duration cue landing on silent audio is a hallucination — check the cue's window against the audio energy (RMS near zero) before trusting or deleting it, then delete and renumber; a hallucinated cue poisons translation counts and every downstream alignment check.
 - **Real-word mishears**: proper-noun web checks miss real-word substitutions (split "pains"→"panes", "their IDs"→"IDEs", a product name heard as a common word) — reviewers read each cue against its topic context, and when the speaker later self-corrects or re-mentions the term, that later cue is the confirmation source.
-- **Fix log discipline**: log every fix as `<ASR output> → <correct form> — how confirmed` (glossary / official page / web / context), and keep an explicit checked-keeps list (speaker coinages, spoken forms that differ from the reference material) — without it, later review rounds "fix" deliberate forms back into errors.
+- **Fix log discipline**: log every fix as `<ASR output> → <correct form> — how confirmed` (glossary / official page / web / context), and keep an explicit checked-keeps list (speaker coinages, spoken forms that differ from the reference material) — without it, later review rounds "fix" deliberate forms back into errors. User-confirmed word meanings land here once — never re-guessed in later rounds.
 
 ## Terminology gate (all on-screen text; translation follows when subtitles are bilingual)
 
@@ -73,7 +88,7 @@ When the video curates a set of third-party items (plugins, tools, models, repos
 
 Runs as a multi-axis subagent loop: one axis per round, a fresh subagent doing the full read each time, repeated until a round reports zero — the loop guards both directions (an under-edited draft and an over-edited one). Two axes need no pattern list because they are generative judgments.
 
-**Axis 1 — pattern defects (external skill, detect mode).** Load `no-ai-slop` (probed in Step 0) and run its detect mode over subtitles, cards, covers, and publish copy. Wrap the call for non-English copy: apply its editing principles and pattern sections, skip its English word lists, report findings in the working language. Each finding names the pattern, quotes the line, and gives a one-line fix. Fallback when the skill is missing — hunt locally: machine-compound words nobody says aloud; translated-English constructions (inverted negation, adverb-fronted praise); stock LLM phrasing, filler transitions, lists of exactly three; card text relying on auto-wrap (break at semantic units instead); vague quantifiers where the verified fact is a specific number ("很多问题", "数十万").
+**Axis 1 — pattern defects (external skill, detect mode).** Load `no-ai-slop` (probed in Step 0) and run its detect mode over subtitles, cards, covers, and publish copy. Wrap the call for non-English copy: apply its editing principles and pattern sections, skip its English word lists, report findings in the working language. Each finding names the pattern, quotes the line, and gives a one-line fix. Fallback when the skill is missing — hunt locally: machine-compound words nobody says aloud; translated-English constructions (inverted negation, adverb-fronted praise); stock LLM phrasing, filler transitions, lists of exactly three; antithetical couplet slogans ("官方在收，插件在守" style — compressions that survive the ear in passing and curdle anywhere they are displayed); card text relying on auto-wrap (break at semantic units instead); vague quantifiers where the verified fact is a specific number ("很多问题", "数十万").
 
 **Axis 2 — generative criteria (register-level slop no pattern list catches).** Judge per line:
 - *Portability*: a line that would read unchanged in anyone's video about any product is filler — replace it with a fact, number, mechanism, or judgment specific to this subject.
@@ -86,7 +101,7 @@ Hand-fix per finding and log What-changed (pattern → fix → flagging axis). A
 
 ## Fact verification checklist
 
-Every number, claim, name, and quote destined for the screen gets cross-checked against an authoritative source (official repo, primary article, the author's own docs). Where docs/README and the implementation disagree, the implementation wins — one production found three README-vs-code mismatches this way. Verified facts carry their source; the rest are UNVERIFIED. Fast-moving numbers (stars, installs) change between recording and publish — when both values appear on screen, stamp each with its as-of date so the card can't read as a contradiction. Numbers read out of an image (screenshot text, OCR, vision-model reads) are UNVERIFIED until re-checked against a text source or API — vision models misread digits. The storyboard stage should only use the verified list.
+Every number, claim, name, and quote destined for the screen gets cross-checked against an authoritative source (official repo, primary article, the author's own docs). Where docs/README and the implementation disagree, the implementation wins — one production found three README-vs-code mismatches this way. Exclusivity claims ("the only one", "first") verify in the falsifying direction: deliberately search for counter-examples — the claim stands only when that search comes up empty (one "only one in its category" fell to a single search and was rewritten to "the highest-starred one"). Verified facts carry their source; the rest are UNVERIFIED. Fast-moving numbers (stars, installs) change between recording and publish — when both values appear on screen, stamp each with its as-of date so the card can't read as a contradiction. Numbers read out of an image (screenshot text, OCR, vision-model reads) are UNVERIFIED until re-checked against a text source or API — vision models misread digits. The storyboard stage should only use the verified list.
 
 ## Images
 

@@ -26,7 +26,7 @@ For original-narration videos (topic in, no transcript), category 4 settles the 
 
 ## The director brief
 
-One page, handed to remotion-video-director as it enters its Phase 2. Fields:
+One page, handed to remotion-video-director at handoff. Fields:
 
 ```
 MATERIAL   what the source is; duration/length; author + URL for attribution
@@ -38,7 +38,7 @@ FORM       chosen visualization form + why the material supports it
 PLATFORMS  target platforms; resolution/fps; required variants (e.g. bili triple card)
 FACTS      verified key numbers/claims for on-screen use; UNVERIFIED list if any
 ASSETS     speaker avatars/photos, source images, logo — what exists, what's cleared
-CRAFT      binding craft constraints from references/visuals.md (type floors, SVG symbols, band design, line-width math) — hand to the director with the brief
+CRAFT      binding craft constraints from references/visuals.md's construction-time sections (per its header split) — hand to the director with the brief
 AUDIO      original track / TTS plan (tts-forge output) / none — for TTS, the timing authority settled at intake (audio-first default or design-first)
 ```
 

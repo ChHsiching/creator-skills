@@ -27,11 +27,12 @@ Each earned by a real production failure; they bind every step:
 - Spending compute or money (full TTS synthesis, final renders) needs the user's explicit yes — "review it" authorizes review, not synthesis.
 - "4K" means a native 4K render; an upscale route is presented for a decision, never chosen silently.
 - Creative candidates (titles, copy, visual variants) reach the user in bulk batches for picking — one-at-a-time rounds burn their time.
-- A user-requested change or a reported defect triggers a scan of ALL same-class instances; scope is confirmed first (this one? every same-class one? every downstream sync it implies?).
+- A user-requested change or a reported defect triggers a scan of ALL same-class instances; scope is confirmed first (this one? every same-class one? every downstream sync it implies?). The confirmation presents what the scan found — every instance, the proposed fix scope, the plan — and waits for the user's yes before hands move; a fix the user bounded stays bounded.
 - Replicating a design reads its source and matches properties; rendered pixels are the fallback when source is unavailable.
 - Source edits use precise per-file matches and get read back — bulk regex/replace scripts can silently no-op while printing success. JSON may be edited structurally.
 - Source material and docs are read end-to-end before producing; searching locates, it never replaces reading.
-- Reports state exactly what changed plus the current full artifact state; failures quote the raw error. Technical decisions are explained in plain language before asking.
+- Reports state exactly what changed plus the current full artifact state; failures quote the raw error; a fix report on delivered video points at mm:ss timestamps (改哪里了看哪里), never "N issues fixed". Technical decisions are explained in plain language before asking.
+- Ambiguous user feedback is confirmed before it is acted on: restate the reading and ask with concrete options until meanings align. Meanings the user confirms land in the project glossary (materials.md's fix log).
 - Push/publish actions show the diff and wait for approval.
 - Files are deleted by explicit, verified list — wildcards and whole-directory rm are banned.
 - Shell commands and file writes use absolute paths — the tool cwd resets between calls.
@@ -79,7 +80,7 @@ Read `references/materials.md` for the gate protocols. Done when: every gate has
 
 Assemble the director brief — the single artifact that carries everything intake and the gates produced. Its format is in `references/intake.md`. Then load `remotion-video-director` and hand it the brief as pre-answered Phase 1 discovery — it still runs its own Creative Direction and Creative Brief steps (the shape questions), flowing into Phase 2 and beyond. Stay available to answer scope-derived questions from intake answers.
 
-Done when: every brief field in the intake.md format is filled from intake and gate outputs, and remotion-video-director has entered Phase 2 with it.
+Done when: every brief field in the intake.md format is filled and remotion-video-director has entered Phase 2 with it.
 
 ## Step 5 — Delivery
 
@@ -87,8 +88,8 @@ These are defaults you do, not questions you ask. Delivery runs as **four named 
 
 - **G1 — stills approval**: every distinct layout/asset state as a labeled stills sheet; the user approves content and assets.
 - **G2 — cheap full render with audio** (1080p; 540p for long videos): spec check passes (ffprobe: fps/duration vs intake, dimensions vs this draft's own target — delivery.md), then the user approves content and timing.
-- **G3 — content gates on the cheap render**: audio mix within loudness targets (ebur128 three-window), blank-scene sweep clean (85%-frame pixel diff), first frame carries content, neutral-vision reads clean. All zero-defect.
-- **G4 — final render + artifacts**: final render at the intake-set resolution (4K unless intake settled lower) through `scripts/render_segments.sh` (read `remotion-4k-polish` first for the 4K path), every platform variant rendered and spec-checked, covers verified per ratio, publish copy complete and length-checked, ending spot-checked, output directory holds deliverables only.
+- **G3 — content gates on the cheap render**: audio mix within loudness targets (ebur128 three-window), blank-scene sweep clean (85%-frame pixel diff), first frame carries content, dual-axis vision reads clean (protocol in delivery.md). All zero-defect.
+- **G4 — final render + artifacts**: time-sensitive claims re-verified before the render command (pre-render re-verification, delivery.md), final render at the intake-set resolution (4K unless intake settled lower) through `scripts/render_segments.sh` (read `remotion-4k-polish` first for the 4K path), every platform variant rendered and spec-checked, covers verified per ratio, publish copy complete and length-checked, ending spot-checked, output directory holds deliverables only.
 
 Done when: G1–G4 have each cleared in order, the final variants' ffprobe specs match the intake answers, and the ending frames of every variant have been spot-checked.
 

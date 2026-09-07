@@ -447,4 +447,13 @@ Skill 假设 Agent 运行时可以：
 
 ## 许可证
 
-MIT
+AGPL-3.0-only · Copyright (c) 2026 ChHsiching —— 见 [LICENSE](LICENSE)。
+
+- 使用（含公司内部使用）、修改、分发均免费；但分发或以本代码提供网络服务时，衍生作品须以 AGPL-3.0 开源。
+- 闭源商用须另行获取商业授权：hsichingchang@gmail.com
+
+本仓库原样内嵌了 [beautiful-article](https://github.com/ConardLi/garden-skills)（MIT，© ConardLi），内嵌部分按 MIT 保持原作者版权 —— 见 [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md)。
+
+### 贡献条款
+
+提交 PR 即表示你同意以 AGPL-3.0 授权你的贡献，并授予维护者在 AGPL 之外另行提供商业授权的权利（你的贡献始终以 AGPL 对所有人开放）。
