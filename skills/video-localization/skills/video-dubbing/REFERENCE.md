@@ -120,93 +120,6 @@ When a term has a common Chinese name AND isn't shown on screen, translate it:
 
 When unsure, ask the user with context — "this term appears at timestamp X, here's the sentence, keep English or translate?"
 
-## Bi-directional re-timing — the math
-
-### The ratio
-
-For each cue:
-```
-ratio = chinese_TTS_duration / english_window_duration
-```
-- `ratio < 1`: Chinese is shorter. The video segment gets **sped up** (compressed) to match.
-- `ratio > 1`: Chinese is longer. The video segment gets **slowed down** (stretched) to match.
-- `ratio ≈ 1`: no change.
-
-Normal-rate audio is **never** time-stretched or atempo'd — every cue plays at its natural TTS speed, and length mismatches are absorbed on the video side. Slow cues (the short-line pacing bug) are fixed per SKILL.md Step 4's speed-up ladder — the ladder's last rung is DSP `atempo` capped at 1.6x per cue, under the pacing policy, not a contradiction of it.
-
-### The string-of-pearls timeline (overlap-proof)
-
-Naive approaches overlap. If you place each cue at `original_start + front_padding` independently, cues that were close in the original (e.g. 0.14s gap) collide after re-timing (both expand into the same new-timeline region). The string-of-pearls construction is provably overlap-free:
-
-1. Walk the cues in order. Maintain a running `new_clock`, starting at 0.
-2. For each gap between cues: `new_clock += original_gap_duration`. (Gaps are preserved as-is — they carry the original rhythm.)
-3. For each cue: `cue.new_start = new_clock`. `cue.new_end = new_clock + chinese_TTS_duration`. `new_clock = cue.new_end`.
-
-Because `new_clock` only ever increases, and each cue's `new_end` becomes the next cue's `new_clock` baseline, **two cues cannot overlap by construction**. This is checkable: assert `cues[i].new_start >= cues[i-1].new_end` for all i.
-
-### Why re-time video, not audio
-
-The old approach (VoxCPM2 + atempo) stretched the audio to fit the window. Problems:
-- atempo > 1.3x: chipmunk voice.
-- atempo < 0.8x: drunken drawl.
-- The ±25% cap meant long Chinese cues still didn't fit, producing alignment-issues.md files full of "this cue couldn't be stretched enough."
-
-Re-timing the video instead:
-- 1.2x video speedup is invisible on talking-head footage (viewers don't notice frame-dropping at 60fps source).
-- 0.7x video slowdown is acceptable (the speaker moves a bit slower; with minterpolation it's smooth).
-- Normal-rate audio stays untouched end to end — the only audio processing the pipeline ever does is the pacing policy's bounded per-cue speed-up of confirmed-slow cues.
-- The only limit is how much speedup viewers tolerate before the picture looks fast-forwarded (>1.5x is the threshold).
-
-### Expected duration change
-
-A faithful Chinese translation is typically 10-30% longer or shorter than the English, depending on the content. Technical talks (lots of English terms retained) tend to run shorter (Chinese grammar is more compact). Storytelling content runs longer (Chinese needs more syllables for the same meaning). The re-timed video will be 10-30% off the original duration — this is expected and acceptable.
-
-### timeline.json — schema
-
-`dubbed/_full/timeline.json` is the plan every later stage (retime, burn, subtitles, adjuster) consumes. Top level: `{"timeline": [segments], "total_new": float, "raw_dur": float, "adjust": {...} (written by adjust_timeline.py)}`. Segment fields:
-
-| field | kind | meaning |
-|---|---|---|
-| `kind` | cue/gap | `cue` = a spoken sentence (audio + video); `gap` = pause between cues (video only) |
-| `idx` | cue | cue number — indexes `sent_<idx:04d>.wav`, translations_dub.txt line, en.full.srt cue |
-| `orig_start`, `orig_end` | both | the segment's window on the RAW video clock |
-| `zh_dur` | cue | the synthesized audio's exact duration (seconds) |
-| `text` | cue | the ZH sentence (same as translations_dub line `idx`) |
-| `en` | cue | the EN full sentence |
-| `new_start`, `new_end`, `new_dur` | both | the segment's window on the re-timed clock; segments tile back-to-back (next.new_start == prev.new_end) |
-| `speed` | both | orig_dur / new_dur playback rate (0.45x = slowed, 1.2x = sped up); gaps carry it too (1.0 unless an adjuster stretched them) |
-
-Invariants to respect when writing tools that edit this file: segments tile contiguously; starts strictly monotonic; a cue's audio (`zh_dur` from its `new_start`) never overlaps the next cue's audio.
-
-## minterpolate — parameter tuning and alternatives
-
-### The chosen parameters
-
-```
-minterpolate=fps=60:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:me=epzs:vsbmc=1
-```
-
-- `mi_mode=mci` — motion-compensated interpolation (the only mode that actually generates new frames; `blend` just averages).
-- `mc_mode=aobmc` — advanced overlapped block motion compensation (highest quality).
-- `me_mode=bidir` — bidirectional motion estimation (uses both past and future frames).
-- `me=epzs` — the motion estimation algorithm. `esa` is higher quality but 5-10x slower; `epzs` is the quality/speed sweet spot.
-- `vsbmc=1` — variable-size block motion compensation (handles local motion better than fixed blocks).
-
-### The hand-artifact limitation
-
-Optical-flow interpolation fails on **fast non-rigid motion**. The classic case: a waving hand. The hand moves too fast for the flow estimator to track, so it produces two ghosted hands (the before and after positions averaged). This is architectural — no parameter tuning fixes it.
-
-**Mitigations** (in order of preference):
-1. **Accept it** — on talking-head videos (the common case), hands are in frame briefly and the artifact is tolerable. The user has accepted this trade-off.
-2. **`mi_mode=blend`** — frame averaging produces a natural motion blur (like a camera shutter) instead of ghosting. Smoother-looking but less sharp. Use if the user objects to ghosting.
-3. **No interpolation** — pure `setpts` slowdown. The segment plays at 15-40fps effective (choppy) but has zero artifacts. Use for action footage where ghosting is unacceptable.
-
-Do **not** try `mc_mode=obmc` (lower quality than aobmc) or `vsbmc=0` (worse) thinking they reduce artifacts — they don't, they just reduce quality.
-
-### Cost
-
-Interpolated segments run at RTF ~23 on CPU. A typical 11-min video has ~90 slowed segments totaling ~7 min of output video — that's ~2.8 hours of processing. Combined with TTS (~8h at 141 cues), the full pipeline is ~11 hours on CPU. GPU (if available) cuts minterpolate to minutes but doesn't help IndexTTS2 (which is CPU-bound by the single-thread constraint).
-
 ## Demucs — raw commands (fallback when `cook dub separate` is missing)
 
 ```bash
@@ -227,7 +140,7 @@ ffmpeg -i no_vocals.wav -af volumedetect -f null - 2>&1 | grep mean_volume
 - **mean_volume < -50dB**: no BGM (pure talk video). Replace vocals entirely — don't mix. The Matt Pocock test video measured -60dB.
 - **mean_volume > -50dB**: BGM present. Mix `dub.wav` (full volume) + `no_vocals.wav` (ducked to -18dB) so the BGM is present in silence but the dub wins when the speaker talks.
 
-The `cook dub mix` command auto-detects this — but if you're mixing manually, check first or you'll amplify silence.
+The assemble stage auto-detects this (mean > -50dB mixes a -18dB bed under the dub); check first if you're mixing manually, or you'll amplify silence.
 
 ## Chinese-dub quality self-check
 
@@ -235,15 +148,54 @@ After burning, listen for these failure modes:
 
 - **洋腔 (foreign accent)** — the Chinese sounds like a non-native speaker. If severe, the reference audio was too English-heavy; try a different reference clip or switch engines. IndexTTS2 should have almost none.
 - **Term-translation mismatch** — the dub says "快照" but the screen shows "snapshot." This means a clause-2 term (on-screen content) was wrongly translated. Audit the term list against the video.
-- **Audio gaps** — silence where there should be speech. A cue failed to synthesize (check `dubbed/_full/_segments/` for < 1KB files) or the timeline placement is wrong (check `timeline.json` for `new_start > new_end`).
-- **Subtitle overflow** — text clipped at screen edges. The `shorten --max-zh` is too high for the font size; re-run shorten with a lower limit (try 36, then 30).
+- **Audio gaps** — silence where there should be speech. A cue failed to synthesize (check `dubbed/_full/_segments/` for < 1KB files) or the placement is wrong (the assemble stage already asserts dub.wav total = raw duration and per-cue windows — re-run it with the log visible).
+- **Subtitle overflow** — text clipped at screen edges. The `shorten --max-zh` is too high for the font size; hand-edit the merged SRT and re-run `cook dub assemble --keep-subs` (shorten runs inside assemble with a fixed limit; there is no standalone re-run).
 
 ## Fallback: 豆包 voice-clone 2.0 API
 
-Kept in `scripts/doubao_synth.py` for cases where IndexTTS2 can't run (no CPU time, need speed). **Not recommended for Chinese dub** — cross-language cloning produces severe 洋腔. But it's 100x faster (API, RTF ~0.02) and works for prototyping.
+For cases where IndexTTS2 can't run (no CPU time, need speed); the original helper script is not shipped with this skill. **Not recommended for Chinese dub** — cross-language cloning produces severe 洋腔. But it's 100x faster (API, RTF ~0.02) and works for prototyping.
 
 API details in the script header. Key gotchas:
 - Training uses `speaker_id: "custom_speaker_id"` + `custom_speaker_id: "<your name>"`.
 - Synthesis uses `speaker: "<your name>"` + header `X-Api-Resource-Id: seed-icl-2.0`.
 - Returns streaming JSON, one chunk per line, `data` field is base64 PCM.
 - Use `audio_params.format: "pcm"` to avoid WAV header concatenation issues.
+
+## Filling the char budget
+
+Legitimate fill material for a cue's char budget (Step 3), in priority order:
+
+1. **English detail the subtitle-style pass compressed away.** Restored
+   clauses, spelled-out implications, the speaker's own restatements. Read the
+   EN cue against your line and put back what meaning was dropped.
+2. **Speaker-style discourse markers.** 「什么意思呢」「为什么这么说」「你会看到」
+   「对吧」 — the connective tissue a speaker actually says. Rotate them: the
+   same marker twice in a script is noticeable, five times is a defect (a
+   10-occurrence collision shipped once from three parallel expanders).
+
+**After parallel filling** (several writers or subagents each filled budgets):
+grep every discourse marker and cap each at 1-2 uses — collisions are the
+signature failure of multi-writer expansion.
+3. **Unpacked compressions.** 「物化记忆」→「一种物化下来的记忆」; a
+   glossed compound becomes the full phrase it stands for.
+
+**Never**: new facts, new numbers, new analogies, invented attributions
+("this is my personal experience" when the speaker said nothing of the sort),
+or comforting narration the speaker never uttered. The dub says what the
+speaker said — at speaking length.
+
+## Editing the dub script
+
+Change lines with exact-match replacements (a script that asserts the old
+text is present before replacing it), never whole-file rewrites — a rewrite
+has twice shipped with accidental line breaks that broke cue alignment.
+
+## The retired re-timing path (archived)
+
+The original pipeline re-timed each video segment to the Chinese audio
+(speed-up drops frames; slow-down `setpts` + `minterpolate` at 60fps). On
+long content it failed the ear check — a 74-minute dub with 600+ interpolated
+segments played "like dropped frames". The identity timeline replaced it:
+video untouched, per-cue audio atempo into original windows. The identity
+timeline is the only supported path; the archive in `deprecated/` (code
+snapshot, adjuster, rate report, reference sections, tests) is read-only.

@@ -1,6 +1,6 @@
 {
   "name": "image-text-cards",
-  "version": "2026.9.7",
+  "version": "2026.9.28",
   "description": "Turn articles and posts into vertical 3:4 image-text card decks for Xiaohongshu (小红书).",
   "skills": "./skills/"
 }

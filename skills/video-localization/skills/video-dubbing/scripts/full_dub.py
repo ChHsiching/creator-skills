@@ -1,23 +1,34 @@
-"""Full Chinese-dub pipeline: IndexTTS2 synthesis → string-of-pearls timeline →
-bi-directional video re-timing (with minterpolate) → concat + audio + burn.
+"""Chinese-dub pipeline: IndexTTS2 synthesis → identity-timeline assembly.
+
+The video is NEVER re-timed: every frame keeps its original timestamp and the
+dubbed release has exactly the raw video's duration. Each cue's synthesized
+audio is fitted into its own original window (cue start → next cue's start)
+with a per-cue atempo — faster or slower synthesis both land in the window.
+Subtitles are generated on the original clock, so there is no "dub clock".
 
 Staged design — each stage writes its outputs to disk, so re-runs resume from
-cache. Designed to be called by the `cook dub` CLI (thin wrapper that imports
-this module), or directly via CLI.
+cache. Designed to be called by the `cook dub` CLI (thin wrapper that runs this
+script as a subprocess), or directly.
 
 Usage (CLI):
   python full_dub.py synth    <output-root> <name>   # stage 1: TTS synthesis
-  python full_dub.py timeline <output-root> <name>   # stage 2: timeline math
-  python full_dub.py retime   <output-root> <name>   # stage 3: video segments + interpolation
-  python full_dub.py burn     <output-root> <name> [--keep-subs]  # stage 4: concat + audio + subtitles + burn
-  python full_dub.py full     <output-root> <name>   # all four, in sequence
+  python full_dub.py assemble <output-root> <name> [--keep-subs]  # stage 2: fit + place + subtitles + burn
+  python full_dub.py full     <output-root> <name>   # both, in sequence
 
 Usage (from cook via importlib):
-  from full_dub import stage_synth, stage_timeline, stage_retime, stage_burn
+  from full_dub import stage_synth, stage_assemble
   stage_synth(output_root, name)
 
+The retired re-timing path (string-of-pearls timeline + per-segment video
+retiming with minterpolate) lives in deprecated/ at the repo root (code snapshot, adjuster, rate report, tests).
+It was retired after its output was rejected at ear-check ("plays like
+dropped frames": slow segments interpolated at 60fps still visibly hitch);
+do not revive it for talking-head content.
+
 Environment:
-  INDEXTTS_DIR  — path to the index-tts checkout (default: ~/Git/index-tts)
+  INDEXTTS_DIR         — path to the index-tts checkout (default: ~/Git/index-tts)
+  DUB_DURATION_FACTOR  — IndexTTS2 duration_factor (default 1.0; ~0.85 is a
+                         brisker house pace — see SKILL.md Step 3a)
 """
 import os, sys, time, re, json, subprocess, contextlib, wave, shutil
 from pathlib import Path
@@ -37,8 +48,8 @@ def _paths(output_root: str | Path, name: str) -> dict:
     """Derive every path this pipeline needs from (output_root, name).
 
     Root is resolved to absolute so downstream ffmpeg calls work regardless of
-    their cwd — Stage 4f sets cwd=work for the ass filter's bare filename, which
-    would double relative paths (e.g. dubbed/_full/ + dubbed/_full/video_adjusted.mp4)."""
+    their cwd — the encode step sets cwd=work for the ass filter's bare
+    filename, which would double relative paths."""
     root = Path(output_root).resolve()
     work = root / "dubbed" / "_full"
     return {
@@ -47,12 +58,10 @@ def _paths(output_root: str | Path, name: str) -> dict:
         "en_full_srt": root / "transcript" / f"{name}.en.full.srt",
         "zh_dub_txt": root / "transcript" / "translations_dub.txt",
         "ref_wav": root / "dubbed" / "_reference" / "ref.wav",
+        "no_vocals": root / "dubbed" / "no_vocals.wav",
         "work": work,
         "segments": work / "_segments",
-        "vsegs": work / "_vsegs",
-        "timeline_json": work / "timeline.json",
         "dub_wav": work / "dub.wav",
-        "video_adjusted": work / "video_adjusted.mp4",
         "dubbing_srt": work / "dubbing.srt",
         "dubbing_en_srt": work / "dubbing.en.srt",
         "dubbing_merged_srt": work / "dubbing.merged.srt",
@@ -73,6 +82,28 @@ def _raw_dur(raw_mp4: Path) -> float:
     return float(r.stdout.strip())
 
 
+def _probe_wh(video: Path) -> tuple[int, int]:
+    """Probe the video stream's (width, height)."""
+    r = subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0",
+         "-show_entries", "stream=width,height",
+         "-of", "csv=p=0:s=x", str(video)],
+        capture_output=True, text=True,
+    )
+    w, h = r.stdout.strip().split("x")
+    return int(w), int(h)
+
+
+def _mean_volume(wav: Path) -> float:
+    """Mean volume in dB of a wav (for the has-BGM check)."""
+    r = subprocess.run(
+        ["ffmpeg", "-i", str(wav), "-af", "volumedetect", "-f", "null", "-"],
+        capture_output=True, text=True,
+    )
+    m = re.search(r"mean_volume:\s*(-?[\d.]+) dB", r.stderr)
+    return float(m.group(1)) if m else -99.0
+
+
 # ---------- small utilities ----------
 
 def get_dur(p):
@@ -89,90 +120,10 @@ def probe_dur(p):
     return float(r.stdout.strip())
 
 
-# ---------- validation helpers (ticket #3) ----------
-#
-# These are pure functions that accept an injectable `prober` so they can be
-# unit-tested without ffmpeg or real media files. stage_retime/stage_burn pass
-# the real probe_dur at the call site; tests pass a lambda.
-
-def _vseg_is_valid(out: Path, expected_dur: float, prober=None) -> tuple[bool, str]:
-    """Check a generated video segment is readable and has positive duration.
-
-    Returns (True, "") when valid, (False, reason) otherwise. The corruption
-    symptom this exists to catch: ffmpeg writes a truncated file with no moov
-    atom, ffprobe then returns 0.0 or raises — that segment must be redone or
-    the concat will silently drop it and truncate the final video.
-    """
-    prober = prober or probe_dur
-    if not out.exists():
-        return False, f"missing {out.name}"
-    if out.stat().st_size < 1000:
-        return False, f"{out.name} truncated ({out.stat().st_size} bytes)"
-    try:
-        dur = prober(out)
-    except Exception as e:
-        return False, f"{out.name} probe raised: {e}"
-    if dur <= 0:
-        return False, f"{out.name} probe returned 0 (moov atom missing?)"
-    # Duration must match the CURRENT plan: the vseg cache is keyed by
-    # segment index only, so a rebuilt timeline (changed audio, adjuster
-    # settings) makes the old file wrong even though it plays fine. Real
-    # segments stay within ~2 frames of the plan (60fps quantization +
-    # encoder rounding); anything past 5 frames is a stale cut.
-    if expected_dur > 0 and abs(dur - expected_dur) > 0.08:
-        return False, (f"{out.name} duration {dur:.3f}s != planned "
-                       f"{expected_dur:.3f}s (stale cache from an older plan?)")
-    return True, ""
-
-
-def _verify_all_vsegs(vsegs_dir: Path, timeline: list, prober=None) -> list[int]:
-    """Return the list of segment indices whose vseg is missing or unreadable.
-
-    Used by stage_retime after the generation loop to confirm every expected
-    v_{i:04d}.mp4 came out clean. Empty list = all good.
-    """
-    bad = []
-    for i, seg in enumerate(timeline):
-        out = vsegs_dir / f"v_{i:04d}.mp4"
-        ok, _ = _vseg_is_valid(out, seg.get("new_dur", 0.0), prober=prober)
-        if not ok:
-            bad.append(i)
-    return bad
-
-
-def _concat_duration_ok(probed: float, expected: float, tol: float = 0.05) -> tuple[bool, str]:
-    """Check the concatenated video's duration matches the timeline total.
-
-    Returns (True, "") within tolerance, (False, reason) otherwise. The
-    silent-truncation failure mode: concat demuxer skips corrupted vsegs, so
-    the result is shorter than the timeline's sum of new_durs. We abort if the
-    difference exceeds `tol` (default 5%, measured against the timeline total).
-    """
-    if expected <= 0:
-        return False, f"expected duration {expected} <= 0 (timeline empty?)"
-    if probed <= 0:
-        return False, f"probed duration {probed} <= 0 (concat failed to probe?)"
-    diff = probed - expected
-    rel = abs(diff) / expected
-    if rel > tol:
-        direction = "short" if diff < 0 else "long"
-        return False, (
-            f"concat duration {probed:.2f}s is {rel*100:.1f}% {direction} of "
-            f"timeline total {expected:.2f}s (tolerance {tol*100:.0f}%)"
-        )
-    return True, ""
-
-
 def fmt_ts(s):
     ms = int(round(s * 1000))
     h, ms = divmod(ms, 3600000); m, ms = divmod(ms, 60000); sec, ms = divmod(ms, 1000)
     return f"{h:02d}:{m:02d}:{sec:02d},{ms:03d}"
-
-
-def fmt_ass_ts(s):
-    ms = int(round(s * 1000))
-    h, ms = divmod(ms, 3600000); m, ms = divmod(ms, 60000); sec, ms = divmod(ms, 1000)
-    return f"{h:d}:{m:02d}:{sec:02d}.{ms//10:02d}"
 
 
 def _ts(s):
@@ -205,6 +156,29 @@ def load_cues(en_full_srt: Path, zh_dub_txt: Path):
     return [(idx, s, e, en, z) for (idx, s, e, en), z in zip(cues, zh)]
 
 
+# ---------- assemble math (pure, unit-tested) ----------
+
+def cue_window(cues, i, total_dur):
+    """Cue i's absorption window: its start to the next cue's start
+    (the last cue runs to the end of the video)."""
+    start = cues[i][1]
+    nxt = cues[i + 1][1] if i + 1 < len(cues) else total_dur
+    return nxt - start
+
+
+def fit_factor(audio_dur, window):
+    """atempo factor that lands the audio exactly in the window.
+    1.0 means it already fits. ffmpeg atempo accepts 0.5-100 in one filter;
+    values outside [0.5, 2.0] mean the text is nowhere near its char budget."""
+    if window <= 0:
+        return 1.0
+    return audio_dur / window
+
+
+def clamp_factor(factor, lo=0.5, hi=2.0):
+    return max(lo, min(hi, factor))
+
+
 # ===== Stage 1: TTS synthesis =====
 
 def stage_synth(output_root, name: str):
@@ -223,11 +197,11 @@ def stage_synth(output_root, name: str):
     log(f"Stage 1 (synth): {len(cues)} cues (single-threaded IndexTTS2)")
 
     # Two-voice support: optional per-cue speaker map. dubbed/_reference/speakers.txt
-    # holds one speaker name per cue (e.g. "bob"/"matt"); each named speaker needs
+    # holds one speaker name per cue; each named speaker needs
     # dubbed/_reference/ref_<speaker>.wav. Without the map, every cue uses the
-    # single ref.wav (original single-voice behavior). NOTE: the sent_NNNN.wav
-    # cache is keyed by cue index only — after changing speakers.txt or a ref
-    # wav, delete the affected segments or the stale voice is reused.
+    # single ref.wav. NOTE: the sent_NNNN.wav cache is keyed by cue index only —
+    # after changing speakers.txt or a ref wav, delete the affected segments or
+    # the stale voice is reused.
     speakers = None
     refs = {}
     spk_file = p["ref_wav"].parent / "speakers.txt"
@@ -254,6 +228,8 @@ def stage_synth(output_root, name: str):
     )
     log(f"  cached: {done}/{len(cues)}")
 
+    df = float(os.environ.get("DUB_DURATION_FACTOR", "1.0"))
+
     if done < len(cues):
         log("loading IndexTTS2...")
         t0 = time.time()
@@ -264,7 +240,7 @@ def stage_synth(output_root, name: str):
             use_bf16=False, use_cuda_kernel=False, use_deepspeed=False, device="cpu",
             use_qwen_emo=False,
         )
-        log(f"loaded in {time.time()-t0:.1f}s")
+        log(f"loaded in {time.time()-t0:.1f}s (duration_factor={df})")
 
     t_start = time.time()
     n_done = done
@@ -274,7 +250,8 @@ def stage_synth(output_root, name: str):
             continue
         t1 = time.time()
         ref = refs[speakers[i]] if speakers else p["ref_wav"]
-        tts.infer(spk_audio_prompt=str(ref), text=zh, output_path=str(out), lang="zh", use_random=False)
+        tts.infer(spk_audio_prompt=str(ref), text=zh, output_path=str(out),
+                  lang="zh", use_random=False, duration_factor=df)
         dur = get_dur(out)
         n_done += 1
         elapsed = time.time() - t_start
@@ -284,482 +261,222 @@ def stage_synth(output_root, name: str):
     log(f"Stage 1 DONE: {len(cues)} cues synthesized")
 
 
-# ===== Stage 2: timeline (string-of-pearls) =====
+# ===== Stage 2: identity-timeline assembly =====
 
-def stage_timeline(output_root, name: str):
+_DUB_BAR_PLAY = 220    # bar height in the ASS coordinate system (PlayRes units)
+_BGM_FLOOR_DB = -50.0  # no_vocals mean quieter than this = no real BGM bed
+_LOUDNORM_I = -18.0    # dub track loudness; NOT source-matched — a quiet source
+                       # master (screencast mics) must not drag the dub down to a whisper
+
+
+def stage_assemble(output_root, name: str, keep_subs: bool = False):
     p = _paths(output_root, name)
-    p["work"].mkdir(parents=True, exist_ok=True)
-    raw_dur = _raw_dur(p["raw_mp4"])
-
     cues = load_cues(p["en_full_srt"], p["zh_dub_txt"])
-    log(f"Stage 2 (timeline): string-of-pearls construction")
+    raw_dur = _raw_dur(p["raw_mp4"])
+    log(f"Stage 2 (assemble): identity timeline — {len(cues)} cues, video untouched ({raw_dur:.2f}s)")
 
-    zh_durs = []
-    for idx, s, e, en, zh in cues:
-        seg = p["segments"] / f"sent_{idx:04d}.wav"
-        if not seg.exists():
-            log(f"  ERROR: missing {seg}, run synth first"); sys.exit(1)
-        zh_durs.append(get_dur(seg))
-
-    timeline = []
-    prev_end = 0.0
-    for i, (idx, s, e, en, zh) in enumerate(cues):
-        if s > prev_end:
-            timeline.append({"kind": "gap", "orig_start": prev_end, "orig_end": s, "idx": None})
-        timeline.append({"kind": "cue", "orig_start": s, "orig_end": e, "idx": idx,
-                         "zh_dur": zh_durs[i], "text": zh, "en": en})
-        prev_end = e
-    if prev_end < raw_dur:
-        timeline.append({"kind": "gap", "orig_start": prev_end, "orig_end": raw_dur, "idx": None})
-
-    new_t = 0.0
-    for seg in timeline:
-        orig_dur = seg["orig_end"] - seg["orig_start"]
-        new_dur = seg["zh_dur"] if seg["kind"] == "cue" else orig_dur
-        seg["new_start"] = new_t
-        seg["new_end"] = new_t + new_dur
-        seg["new_dur"] = new_dur
-        seg["speed"] = orig_dur / new_dur if new_dur > 0 else 1.0
-        new_t += new_dur
-
-    total_new = new_t
-    cues_seg = [s for s in timeline if s["kind"] == "cue"]
-    fast = [s for s in cues_seg if s["speed"] > 1.05]
-    slow = [s for s in cues_seg if s["speed"] < 0.95]
-    log(f"  new total: {total_new:.2f}s (raw {raw_dur:.2f}s, {'shorter' if total_new<raw_dur else 'longer'} by {abs(total_new-raw_dur):.1f}s)")
-    log(f"  speed-up cues: {len(fast)}, slow-down cues: {len(slow)}")
-
-    with open(p["timeline_json"], "w", encoding="utf-8") as f:
-        json.dump({"timeline": timeline, "total_new": total_new, "raw_dur": raw_dur}, f, ensure_ascii=False, indent=2)
-    log(f"Stage 2 DONE: {p['timeline_json']}")
-
-
-# ===== Stage 3: video segments + minterpolate =====
-
-# A span shorter than ~2 source frames has no real footage to stretch:
-# ffmpeg's frame duplication under setpts lands far off the planned duration
-# no matter the retry count (the 41-segment incident).
-_FRAME_MIN_DUR = 0.045
-
-
-def _segment_cmds(seg, raw_mp4: Path, out: Path, workdir: Path):
-    """Build the ffmpeg command(s) that render one timeline segment to a vseg.
-
-    Every command pins the output to the exact CFR-60 frame count via
-    -frames:v round(new_dur*60), so duration quantizes to the plan (within
-    one frame) instead of wherever ffmpeg's frame duplication stops. A
-    sub-frame span is rendered as a held frame: extract the frame at the
-    span's midpoint, then loop it for exactly N frames (a static pause).
-    Returns (commands, label); commands run in order, output is the last."""
-    os_v = seg["orig_start"]; oe_v = seg["orig_end"]
-    orig_dur = oe_v - os_v
-    new_dur = seg["new_dur"]
-    factor = new_dur / orig_dur if orig_dur > 0 else 1.0
-    speed = seg["speed"]
-    frames = max(1, round(new_dur * 60))
-
-    if orig_dur < _FRAME_MIN_DUR:
-        mid = os_v + orig_dur / 2
-        png = workdir / (out.stem + "_frame.png")
-        extract = ["ffmpeg", "-y", "-ss", f"{mid:.3f}", "-i", str(raw_mp4),
-                   "-frames:v", "1", str(png)]
-        hold = ["ffmpeg", "-y", "-loop", "1", "-i", str(png),
-                "-an", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
-                "-pix_fmt", "yuv420p", "-r", "60", "-frames:v", str(frames), str(out)]
-        return [extract, hold], f"hold {frames}f"
-
-    if seg["kind"] == "cue" and speed < 0.95:
-        vf = (f"setpts={factor:.6f}*PTS,"
-              f"minterpolate=fps=60:mi_mode=mci:mc_mode=aobmc:"
-              f"me_mode=bidir:me=epzs:vsbmc=1")
-        label = f"slow {speed:.2f}x+interp"
-    elif seg["kind"] == "cue":
-        vf = f"setpts={factor:.6f}*PTS"
-        label = f"{'fast' if speed>1.05 else 'keep'} {speed:.2f}x"
-    else:
-        # A gap-absorbing adjuster (adjust_timeline.py) extends gaps to
-        # cover capped-cue audio overrun — cut those stretched (setpts;
-        # pauses are static so no minterpolate needed). Unextended gaps
-        # pass through 1:1 as before.
-        if factor > 1.001:
-            vf = f"setpts={factor:.6f}*PTS"
-            label = f"gap+{factor:.2f}x"
-        else:
-            vf = "null"
-            label = "gap"
-
-    cmd = ["ffmpeg", "-y", "-ss", f"{os_v:.3f}", "-t", f"{orig_dur:.3f}",
-           "-i", str(raw_mp4),
-           "-vf", vf, "-an", "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
-           "-r", "60", "-frames:v", str(frames), str(out)]
-    return [cmd], label
-
-
-def stage_retime(output_root, name: str):
-    p = _paths(output_root, name)
-    p["vsegs"].mkdir(parents=True, exist_ok=True)
-    if not p["timeline_json"].exists():
-        log("  ERROR: missing timeline.json, run timeline first"); sys.exit(1)
-
-    with open(p["timeline_json"], encoding="utf-8") as f:
-        data = json.load(f)
-    timeline = data["timeline"]
-    log(f"Stage 3 (retime): {len(timeline)} segments")
-
-    slow_segs = [s for s in timeline if s["kind"] == "cue" and s["speed"] < 0.95]
-    slow_video_dur = sum(s["new_dur"] for s in slow_segs)
-    log(f"  interpolation segments: {len(slow_segs)}, ~{slow_video_dur*23/60:.0f}min estimated")
-
-    t_stage = time.time()
-    MAX_SEG_RETRIES = 2  # redo a corrupted segment this many times before giving up
-    for i, seg in enumerate(timeline):
-        out = p["vsegs"] / f"v_{i:04d}.mp4"
-        if out.exists() and out.stat().st_size > 1000:
-            # Resume from cache — but still validate; a previous run may have
-            # left a truncated file (moov atom missing) that ffprobe rejects.
-            ok, reason = _vseg_is_valid(out, seg.get("new_dur", 0.0))
-            if ok:
-                continue
-            log(f"  [{i+1}/{len(timeline)}] cached {out.name} invalid ({reason}) — regenerating")
-            try:
-                out.unlink()
-            except OSError:
-                pass
-
-        cmds, label = _segment_cmds(seg, p["raw_mp4"], out, p["work"])
-        new_dur = seg["new_dur"]
-        orig_dur = seg["orig_end"] - seg["orig_start"]
-
-        # Retry loop: ffmpeg can return 0 yet write a truncated file (moov atom
-        # missing) that ffprobe rejects. Probe each output; redo on failure.
-        for attempt in range(MAX_SEG_RETRIES + 1):
-            t0 = time.time()
-            rc = 0
-            for cmd in cmds:
-                r = subprocess.run(cmd, capture_output=True, text=True)
-                if r.returncode != 0:
-                    rc = r.returncode
-                    break
-            wall = time.time() - t0
-            if rc != 0:
-                log(f"  [{i+1}/{len(timeline)}] ERR seg {i} (attempt {attempt+1}): {r.stderr[-200:]}")
-                ok, reason = False, "ffmpeg non-zero exit"
-            else:
-                ok, reason = _vseg_is_valid(out, new_dur)
-            if ok:
-                # drop the held-frame temp png if the hold path was used
-                if len(cmds) > 1:
-                    try:
-                        workdir_png = p["work"] / (out.stem + "_frame.png")
-                        workdir_png.unlink()
-                    except OSError:
-                        pass
-                break
-            # Corrupted output — delete so the retry (or a later run) regenerates.
-            try:
-                out.unlink()
-            except OSError:
-                pass
-            if attempt < MAX_SEG_RETRIES:
-                log(f"  [{i+1}/{len(timeline)}] seg {i} invalid ({reason}) — retry {attempt+1}/{MAX_SEG_RETRIES}")
-
-        if ok:
-            elapsed = time.time() - t_stage
-            n_done = i + 1
-            rate = n_done / max(elapsed, 1)
-            eta = (len(timeline) - n_done) / rate if rate > 0 else 0
-            log(f"  [{n_done}/{len(timeline)}] {label} {orig_dur:.1f}s→{new_dur:.1f}s wall={wall:.0f}s ETA={eta/60:.0f}min")
-        else:
-            log(f"  [{i+1}/{len(timeline)}] FAILED seg {i} after {MAX_SEG_RETRIES+1} attempts: {reason}")
-
-    # Post-loop: confirm every expected vseg exists and is readable. A missing
-    # vseg here would silently truncate the concat, so name the bad ones and
-    # abort instead of producing a short final video.
-    bad = _verify_all_vsegs(p["vsegs"], timeline)
-    if bad:
-        log(f"  ERROR: {len(bad)} segment(s) missing or unreadable: {bad}")
-        log(f"  Stage 3 ABORTED — re-run `retime` to regenerate, or investigate ffmpeg/minterpolate failures on those segments.")
-        sys.exit(1)  # failed: exit non-zero so cook reports ok:false
-
-    log(f"Stage 3 DONE — {len(timeline)} segments verified")
-
-
-# ===== Stage 4: concat + audio + subtitles + burn =====
-
-# The dub burns bilingual subtitles in the same bottom-bar layout as the
-# bilingual release from video-subtitle: ZH (shorten/merge-short fragments)
-# on top, EN (full sentences mapped onto the dub's re-timed clock) below.
-# Font sizes and margins are subtitles.py's bottom-bar defaults (ZH 64 /
-# EN 44, marginv 140) — no overrides here, so the two releases can't drift.
-_DUB_BAR = 220
-
-
-def stage_burn(output_root, name: str, keep_subs: bool = False):
-    p = _paths(output_root, name)
-    if not p["timeline_json"].exists():
-        log("  ERROR: missing timeline.json"); sys.exit(1)
-    # Validate --keep-subs inputs BEFORE any ffmpeg work: 4a re-encodes the
-    # whole video and 4b reassembles dub.wav — minutes of work that would be
-    # wasted when the flag's inputs are missing. The bilingual SRT is checked
-    # too: the ASS rebuild (always-on) reads it.
     if keep_subs:
         for f in (p["dubbing_merged_srt"], p["work"] / "dubbing.en.merged.srt",
                   p["work"] / "dubbing.bilingual.srt"):
             if not f.exists():
-                log(f"  ERROR: --keep-subs needs {f} on disk; run a plain burn first")
+                log(f"  ERROR: --keep-subs needs {f} on disk; run a plain assemble first")
                 sys.exit(1)
-    with open(p["timeline_json"], encoding="utf-8") as f:
-        data = json.load(f)
-    timeline = data["timeline"]
-    log(f"Stage 4 (burn): concat + audio + subtitles + burn")
 
-    # Re-base the timeline onto the ACTUAL concatenated clock. Retime's
-    # per-segment frame quantization pads each vseg by a few frames; over
-    # ~1500 segments that accumulates (observed +20s on a 2781s plan).
-    # Audio placement (4b) and subtitle generation (4c) both read
-    # new_start/new_end, so they must follow the measured clock or they
-    # drift progressively against the picture.
-    log("  4a-0: measuring actual vseg durations")
-    t_acc = 0.0
-    for i, seg in enumerate(timeline):
-        d = probe_dur(p["vsegs"] / f"v_{i:04d}.mp4")
-        seg["new_start"] = t_acc
-        seg["new_end"] = t_acc + d
-        seg["new_dur"] = d
-        t_acc += d
-    planned = data.get("total_new")
-    if planned:
-        log(f"    actual total {t_acc:.2f}s vs planned {planned:.2f}s (drift {t_acc-planned:+.2f}s)")
-    data["total_new"] = t_acc
-
-    # 4a: concat video segments
-    log("  4a: concat segments")
-    concat_txt = p["work"] / "_concat.txt"
-    with open(concat_txt, "w") as f:
-        for i in range(len(timeline)):
-            f.write(f"file '{(p['vsegs'] / f'v_{i:04d}.mp4').as_posix()}'\n")
-    r_concat = subprocess.run(
-        ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(concat_txt),
-         "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18", "-r", "60",
-         str(p["video_adjusted"])],
-        capture_output=True, text=True,
-    )
-    if r_concat.returncode != 0:
-        # Concat failing almost always means an upstream vseg is corrupt (stage
-        # 3's validation should have caught this, but a filesystem race or a
-        # mid-run kill can leave bad state). Abort here rather than producing a
-        # silently-truncated video downstream.
-        log(f"    ERR concat failed (rc={r_concat.returncode}): {r_concat.stderr[-400:]}")
-        log(f"    Stage 4 ABORTED — re-run `retime` to regenerate vsegs, then retry burn.")
-        sys.exit(1)  # failed: exit non-zero so cook reports ok:false
-
-
-    concat_dur = probe_dur(p["video_adjusted"])
-    total_new = data.get("total_new")
-    if total_new:
-        ok, reason = _concat_duration_ok(concat_dur, total_new)
-        if not ok:
-            log(f"    ERR {reason}")
-            log(f"    Stage 4 ABORTED — concat duration doesn't match timeline; a vseg may be corrupt or dropped. Re-run `retime`.")
-            sys.exit(1)  # failed: exit non-zero so cook reports ok:false
-
-    log(f"    video_adjusted.mp4: {concat_dur:.2f}s (timeline total {total_new:.2f}s)" if total_new else f"    video_adjusted.mp4: {concat_dur:.2f}s")
-
-    # 4b: place audio (sequential concatenation — string of pearls)
-    log("  4b: place audio (sequential concat)")
-    audio_plan = []
-    prev_audio_end = None
-    for seg in timeline:
-        if seg["kind"] != "cue":
+    # 2a. Fit pass — per-cue atempo into its own window.
+    #     A factor near 1.0 is the norm (the translation was written to a char
+    #     budget, so audio ≈ window). Anything far from 1.0 is a budget miss:
+    #     the sentence's text is wrong for its window, and the fix is editing
+    #     that sentence + re-synthesizing that cue — not more stretching.
+    log("  2a: fit pass (per-cue atempo into original windows)")
+    n_fit = 0
+    budget_misses = []
+    durs = []
+    for i, (idx, s, e, en, zh) in enumerate(cues):
+        wav = p["segments"] / f"sent_{idx:04d}.wav"
+        if not wav.exists() or wav.stat().st_size <= 1000:
+            log(f"  ERROR: missing/truncated {wav.name} — run the synth stage first")
+            sys.exit(1)
+        d = get_dur(wav)
+        window = cue_window(cues, i, raw_dur)
+        factor = fit_factor(d, window)
+        if 0.999 <= factor <= 1.001:
+            durs.append(d)
             continue
-        ns, ne = seg["new_start"], seg["new_end"]
-        # 4a-0's re-base onto measured vseg durations quantizes every segment
-        # to whole 60fps frames (+/-16ms each); the error accumulates and can
-        # push a cue's start slightly before the previous audio ends. Keep the
-        # audio strictly non-overlapping (and the ZH subtitles in 4c, which
-        # follow this plan, in sync with what is heard).
-        if prev_audio_end is not None and ns < prev_audio_end + 0.03:
-            ns = prev_audio_end + 0.03
-        # The ZH subtitle window must cover the audio, not just the video
-        # segment: with a gap-absorbing adjuster (adjust_timeline.py) a capped
-        # cue's audio overruns new_end, and the subtitle would vanish while
-        # the voice is still speaking.
-        ne = max(ne, ns + seg.get("zh_dur", 0.0))
-        audio_plan.append((p["segments"] / ("sent_%04d.wav" % seg["idx"]),
-                           int(round(ns * 1000)), ns, ne, seg["text"]))
-        prev_audio_end = ns + seg.get("zh_dur", 0.0)
-    target = probe_dur(p["video_adjusted"])
+        if not (0.67 <= factor <= 1.5):
+            budget_misses.append((idx, factor, d, window))
+        k = clamp_factor(factor)
+        tmp = wav.with_suffix(".fit.wav")
+        r = subprocess.run(
+            ["ffmpeg", "-y", "-v", "error", "-i", str(wav),
+             "-af", f"atempo={k:.5f}", "-c:a", "pcm_s16le", str(tmp)],
+            capture_output=True, text=True)
+        if r.returncode != 0 or not tmp.exists():
+            log(f"  ERROR: atempo cue {idx}: {r.stderr[-200:]}")
+            sys.exit(1)
+        tmp.replace(wav)
+        d = get_dur(wav)
+        durs.append(d)
+        n_fit += 1
+    log(f"    fitted {n_fit}/{len(cues)} cues")
+    for idx, factor, d, window in budget_misses:
+        log(f"    WARNING: idx{idx} factor {factor:.2f} (audio {d:.1f}s vs window {window:.1f}s) — "
+            f"char budget miss; edit that sentence and re-synthesize the cue for best quality")
 
-    # Small window overlaps are expected: the ne-extension above (subtitle
-    # must cover the audio) can push a cue's window a few frames past the
-    # next cue's vseg start when frame quantization made the video segment a
-    # hair shorter than the audio. The audio itself doesn't overlap — the
-    # tail lands in the next segment's lead-in. Guard against REAL overlaps
-    # (stale timeline vs vsegs) but tolerate the sub-frame-window kind.
-    _TAIL_TOL = 0.25
-    for i in range(1, len(audio_plan)):
-        ov = audio_plan[i-1][3] - audio_plan[i][2]
-        assert ov <= _TAIL_TOL, f"overlap! cue{i} {audio_plan[i][2]} < {audio_plan[i-1][3]} ({ov:.3f}s beyond tolerance)"
-    log(f"    {len(audio_plan)} cues, no overlap")
-
-    # Assemble the dub track by sequential concatenation: cues never overlap
-    # (asserted above) and the timeline tiles back-to-back, so the track is
-    # literally cue -> silence -> cue -> silence. Each cue is normalized to
-    # 22050/mono/s16 and padded to the next cue's start with one small
-    # ffmpeg call (constant command-line length); the final assembly is
-    # frame-level concatenation in Python. A single adelay+amix command
-    # grows past the Windows 32K command-line limit around ~200 cues
-    # (WinError 206) — this layout has no such ceiling.
+    # 2b. Place audio on the original clock — cue at its original start,
+    #     silence to the next start, total exactly raw_dur. Sequential pad
+    #     assembly (constant command length; no adelay+amix 32K-argv ceiling).
+    log("  2b: place audio on the original clock")
     pad_dir = p["work"] / "_audio_pad"
+    if pad_dir.exists():
+        shutil.rmtree(pad_dir)
     pad_dir.mkdir(parents=True, exist_ok=True)
+    if p["dub_wav"].exists():
+        p["dub_wav"].unlink()
     with contextlib.closing(wave.open(str(p["dub_wav"]), "wb")) as out_w:
         out_w.setnchannels(1)
         out_w.setsampwidth(2)
         out_w.setframerate(22050)
-        lead = audio_plan[0][2]
-        if lead > 0.01:
-            out_w.writeframes(b"\x00" * (int(lead * 22050) * 2))
-        for i, (seg_wav, _, ns, _, _) in enumerate(audio_plan):
-            next_start = audio_plan[i + 1][2] if i + 1 < len(audio_plan) else target
-            pad = max(next_start - ns - get_dur(seg_wav), 0.0)
+        clock = 0.0
+        for i, (idx, s, e, en, zh) in enumerate(cues):
+            if s > clock + 0.001:
+                out_w.writeframes(b"\x00" * (int((s - clock) * 22050) * 2))
+                clock = s
+            wav = p["segments"] / f"sent_{idx:04d}.wav"
+            d = get_dur(wav)
+            next_start = cues[i + 1][1] if i + 1 < len(cues) else raw_dur
+            pad = max(0.0, next_start - (clock + d))
             padded = pad_dir / ("cue_%04d.wav" % i)
             r = subprocess.run(
-                ["ffmpeg", "-y", "-v", "error", "-i", str(seg_wav),
+                ["ffmpeg", "-y", "-v", "error", "-i", str(wav),
                  "-af", "apad=pad_dur=%.3f" % pad,
                  "-ar", "22050", "-ac", "1", "-c:a", "pcm_s16le", str(padded)],
                 capture_output=True, text=True)
             if r.returncode != 0:
-                log(f"    ERR pad cue {i}: {r.stderr[-300:]}")
-                log("    Stage 4 ABORTED — audio padding failed")
-                sys.exit(1)  # failed: exit non-zero so cook reports ok:false
-
+                log(f"  ERROR: pad cue {idx}: {r.stderr[-300:]}")
+                sys.exit(1)
             with contextlib.closing(wave.open(str(padded), "rb")) as w:
                 out_w.writeframes(w.readframes(w.getnframes()))
-
-    # Clamp to the video length (only if the last cue's audio ran past it).
-    if get_dur(p["dub_wav"]) > target + 0.05:
+            clock += get_dur(padded)
+    if get_dur(p["dub_wav"]) > raw_dur + 0.05:
         tmp = p["work"] / "_dub_full.wav"
         p["dub_wav"].replace(tmp)
         r = subprocess.run(
             ["ffmpeg", "-y", "-v", "error", "-i", str(tmp),
-             "-t", "%.3f" % target, "-ar", "22050", "-ac", "1",
+             "-t", "%.3f" % raw_dur, "-ar", "22050", "-ac", "1",
              "-c:a", "pcm_s16le", str(p["dub_wav"])],
             capture_output=True, text=True)
         tmp.unlink(missing_ok=True)
         if r.returncode != 0:
-            log(f"    ERR clamp dub.wav: {r.stderr[-300:]}")
-            log("    Stage 4 ABORTED — audio clamp failed")
-            sys.exit(1)  # failed: exit non-zero so cook reports ok:false
+            log(f"  ERROR: clamp dub.wav: {r.stderr[-300:]}")
+            sys.exit(1)
+    dub_dur = get_dur(p["dub_wav"])
+    if abs(dub_dur - raw_dur) > 0.05:
+        log(f"  ERROR: dub.wav {dub_dur:.3f}s != raw {raw_dur:.3f}s — assembly is broken, not shipping")
+        sys.exit(1)
+    log(f"    dub.wav: {dub_dur:.3f}s (matches raw)")
 
-    log(f"    dub.wav: {get_dur(p['dub_wav']):.2f}s")
-
-    # 4c: generate SRTs (pre-shorten, on the new timeline)
-    # --keep-subs skips 4c + 4d's regeneration entirely and reuses the
-    # subtitle files already on disk — the recovery path for hand-edited
-    # dubbing.bilingual.srt / merged SRTs after the post-burn quality gate
-    # (SKILL.md Step 7). Regenerating from source would silently wipe those
-    # edits (split points are computed by shorten, not stored in any input
-    # file). The ASS is always rebuilt from the on-disk bilingual SRT so
-    # style stays in sync with the pipeline.
-    if keep_subs:
-        log("  4c/4d: --keep-subs — reusing on-disk subtitle files (ass + burn only)")
-    else:
-        log("  4c: generate dubbing.srt + dubbing.en.srt")
-        srt_lines = []
-        for i, (_, _, cs, ce, text) in enumerate(audio_plan):
-            srt_lines += [str(i+1), f"{fmt_ts(cs)} --> {fmt_ts(ce)}", text, ""]
-        with open(p["dubbing_srt"], "w", encoding="utf-8") as f:
-            f.write("\n".join(srt_lines))
-
-        # EN side: full-sentence English (en.full.srt texts) placed on the
-        # re-timed clock. Cue idx i's window [new_start, new_end] is exactly
-        # where its Chinese audio plays, so the mapping is index-aligned by
-        # construction. This SRT feeds the biliteral merge in 4d and ships
-        # as cloud-srt/en.dub.srt.
-        en_texts = {}
-        with open(p["en_full_srt"], encoding="utf-8") as f:
-            for m in _CUE_RE.finditer(f.read()):
-                en_texts[int(m[1])] = re.sub(r"\s+", " ", m[4].strip())
-        n_cues = sum(1 for s in timeline if s["kind"] == "cue")
-        assert len(en_texts) == n_cues, \
-            f"en.full.srt has {len(en_texts)} cues but timeline has {n_cues} — regenerate timeline"
-        en_srt_lines = []
-        for seg in timeline:
-            if seg["kind"] != "cue":
-                continue
-            en_srt_lines += [str(seg["idx"]),
-                             f"{fmt_ts(seg['new_start'])} --> {fmt_ts(seg['new_end'])}",
-                             en_texts[seg["idx"]], ""]
-        with open(p["dubbing_en_srt"], "w", encoding="utf-8") as f:
-            f.write("\n".join(en_srt_lines))
-
-    # 4d: shorten + merge-short + biliteral + ass (same pipeline as video-subtitle)
-    # shorten splits long cues into single-line cues, allocating sub-cue time
-    # by display-width proportion (wlen). This keeps each cue one zh line.
-    # With --keep-subs the regeneration chain is skipped and the on-disk
-    # merged/bilingual SRTs are used as-is (see the 4c note).
+    # 2c. Subtitles on the ORIGINAL clock (there is no dub clock). ZH window
+    #     spans the audio (not just the cue): end = max(cue end, start+audio).
+    #     --keep-subs skips this regeneration and reuses the on-disk subtitle
+    #     files (the recovery path after a post-burn quality-gate hand edit —
+    #     regenerating would wipe it; the ASS is still rebuilt from the
+    #     on-disk bilingual SRT).
     subs_mod = _import_subtitles_module()
-    short_srt = p["work"] / "dubbing.short.srt"
-    merged_srt = p["dubbing_merged_srt"]
-    bilingual_srt = p["work"] / "dubbing.bilingual.srt"
-    cooked_ass = p["work"] / "dubbing.cooked.ass"
-    if not keep_subs:
-        log("  4d: shorten + merge-short + biliteral + ass (via video-subtitle's subtitles.py)")
+    if keep_subs:
+        log("  2c: --keep-subs — reusing on-disk subtitle files")
+        merged_srt = p["dubbing_merged_srt"]
+        en_merged_srt = p["work"] / "dubbing.en.merged.srt"
+        bilingual_srt = p["work"] / "dubbing.bilingual.srt"
+    else:
+        log("  2c: generate dubbing.srt + dubbing.en.srt on the original clock")
+        zh_lines, en_lines = [], []
+        for i, (idx, s, e, en, zh) in enumerate(cues):
+            ne = max(e, s + get_dur(p["segments"] / f"sent_{idx:04d}.wav"))
+            zh_lines += [str(i + 1), f"{fmt_ts(s)} --> {fmt_ts(ne)}", zh, ""]
+            en_lines += [str(i + 1), f"{fmt_ts(s)} --> {fmt_ts(ne)}", en, ""]
+        (p["dubbing_srt"]).write_text("\n".join(zh_lines), encoding="utf-8")
+        (p["dubbing_en_srt"]).write_text("\n".join(en_lines), encoding="utf-8")
+
+        # Same pipeline the bilingual release runs, on the original clock:
+        # shorten splits long cues into single-line cues; EN full sentences
+        # get the same treatment so union events fit the bar; biliteral unions
+        # them (text repeating across the other language's breakpoints is the
+        # union's design, not a defect).
+        short_srt = p["work"] / "dubbing.short.srt"
+        merged_srt = p["dubbing_merged_srt"]
         _run_subs(subs_mod, ["shorten", str(p["dubbing_srt"]), str(short_srt),
                              "--lang", "zh", "--max-zh", "56"])
         _run_subs(subs_mod, ["merge-short", str(short_srt), str(merged_srt),
                              "--min-dur", "1.2", "--max-len", "56", "--lang", "zh"])
-        # EN full sentences are display-unbounded — up to ~260 chars wrap to 4-5
-        # lines and overflow the EN band under the ZH layer (ZH is layer 0, drawn
-        # over EN's layer -1). Apply the same shorten + merge-short the bilingual
-        # release uses (MAX_EN=160 ~= 2 wrapped lines) so the union's EN events
-        # fit the bar. The merged EN also ships as cloud-srt/en.dub.srt, matching
-        # the bilingual release's en.merged.srt convention.
         en_short_srt = p["work"] / "dubbing.en.short.srt"
         en_merged_srt = p["work"] / "dubbing.en.merged.srt"
         _run_subs(subs_mod, ["shorten", str(p["dubbing_en_srt"]), str(en_short_srt),
                              "--lang", "en"])
         _run_subs(subs_mod, ["merge-short", str(en_short_srt), str(en_merged_srt),
                              "--min-dur", "1.2", "--max-len", "160", "--lang", "en"])
-        # biliteral unions the (now shortened) EN with the fragmented ZH; when a
-        # span from either language crosses the other's breakpoint its text
-        # repeats across the cues it spans — the bilingual release's structural
-        # repetition. Flag with care in the post-burn quality gate: repetition on either side is the
-        # design, not a defect.
-        _run_subs(subs_mod, ["biliteral", str(en_merged_srt),
-                             str(merged_srt), str(bilingual_srt)])
-    else:
-        en_merged_srt = p["work"] / "dubbing.en.merged.srt"
+        bilingual_srt = p["work"] / "dubbing.bilingual.srt"
+        _run_subs(subs_mod, ["biliteral", str(en_merged_srt), str(merged_srt), str(bilingual_srt)])
+
+    # 2d. ASS with correct geometry for THIS frame size. The subtitles module's
+    #     coordinate system is 1920 x (1080 + bar); libass scales it to the
+    #     real frame per-axis. For the bar to start exactly at the video's
+    #     bottom edge on a frame that is not 1920x1080 16:9, the y-scale must
+    #     be exactly H/1080, so: real pad = bar_play * H/1080, and
+    #     PlayResX = W * 1080 / H (uniform scale, no glyph stretch).
+    W, H = _probe_wh(p["raw_mp4"])
+    play_x = round(W * 1080 / H)
+    pad_px = round(_DUB_BAR_PLAY * H / 1080)
+    if play_x != 1920:
+        log(f"  2d: non-1080p frame {W}x{H} — PlayResX={play_x}, real bar={pad_px}px "
+            f"(bar stays {_DUB_BAR_PLAY} in coordinate units)")
+    subs_mod.PLAY_RES_X = play_x
+    cooked_ass = p["work"] / "dubbing.cooked.ass"
     _run_subs(subs_mod, ["ass", str(bilingual_srt), str(cooked_ass),
-                         "--bottom-bar", str(_DUB_BAR)])
+                         "--bottom-bar", str(_DUB_BAR_PLAY)])
     shutil.copyfile(cooked_ass, p["burn_ass"])
 
-    # 4e: copy upload subtitles to cloud-srt/
-    log("  4e: copy upload subtitles to cloud-srt/")
+    log("  2e: copy upload subtitles to cloud-srt/")
     p["cloud_srt"].parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(merged_srt, p["cloud_srt"])
     shutil.copyfile(en_merged_srt, p["cloud_srt_en"])
 
-    # 4f: burn (run from work dir so ASS uses relative path — Windows ass filter rejects C: paths)
-    log(f"  4f: burn (pad + ass, bottom-bar {_DUB_BAR})")
+    # 2f. Encode — raw video stream untouched (identity), pad the bar, burn the
+    #     ASS, mix the dub (+ no_vocals bed only when the source really has
+    #     BGM), loudnorm to house level. Run from the work dir so the ass
+    #     filter gets a bare filename (Windows rejects C: paths in ass=).
+    log(f"  2f: encode (pad +{pad_px}px bar, identity video)")
+    bgm_bed = (p["no_vocals"].exists()
+               and _mean_volume(p["no_vocals"]) > _BGM_FLOOR_DB)
+    if bgm_bed:
+        log("    BGM detected in no_vocals — mixing bed at -18dB")
+        a_filter = ("[2:a]volume=-18dB[nv];[1:a][nv]amix=inputs=2:duration=first:normalize=0"
+                    f",loudnorm=I={_LOUDNORM_I}:TP=-1.5:LRA=11[a]")
+        cmd = ["ffmpeg", "-y", "-i", str(p["raw_mp4"]), "-i", str(p["dub_wav"]),
+               "-i", str(p["no_vocals"]),
+               "-vf", f"pad=iw:ih+{pad_px}:0:0:color=black,ass=burn.ass",
+               "-filter_complex", a_filter, "-map", "0:v", "-map", "[a]"]
+    else:
+        a_filter = f"loudnorm=I={_LOUDNORM_I}:TP=-1.5:LRA=11"
+        cmd = ["ffmpeg", "-y", "-i", str(p["raw_mp4"]), "-i", str(p["dub_wav"]),
+               "-vf", f"pad=iw:ih+{pad_px}:0:0:color=black,ass=burn.ass",
+               "-af", a_filter, "-map", "0:v", "-map", "1:a"]
+    cmd += ["-c:v", "libx264", "-preset", "faster", "-crf", "20",
+            "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart",
+            "-shortest", str(p["final_mp4"])]
     p["final_mp4"].parent.mkdir(parents=True, exist_ok=True)
-    r = subprocess.run(
-        ["ffmpeg", "-y", "-i", str(p["video_adjusted"]), "-i", str(p["dub_wav"]),
-         "-vf", f"pad=iw:ih+{_DUB_BAR}:0:0:color=black,ass=burn.ass",
-         "-map", "0:v", "-map", "1:a",
-         "-c:v", "libx264", "-preset", "medium", "-crf", "20", "-r", "60",
-         "-c:a", "aac", "-b:a", "128k", "-shortest", str(p["final_mp4"])],
-        cwd=str(p["work"]), capture_output=True, text=True,
-    )
+    r = subprocess.run(cmd, cwd=str(p["work"]), capture_output=True, text=True)
     if r.returncode != 0:
-        log(f"    ERR: {r.stderr[-500:]}")
-        # Do NOT print the DONE marker on a failed burn: cook's detached
-        # done_marker polls for "Stage 4 DONE" and would report success.
-        log(f"Stage 4 FAILED — final encode rc={r.returncode}")
+        log(f"  ERROR: final encode: {r.stderr[-500:]}")
+        log("Stage 2 FAILED")
         sys.exit(1)  # failed: exit non-zero so cook reports ok:false
 
-    log(f"    DONE: {p['final_mp4']} ({probe_dur(p['final_mp4']):.2f}s)")
-    log(f"Stage 4 DONE")
+    final_dur = probe_dur(p["final_mp4"])
+    if abs(final_dur - raw_dur) > 0.5:
+        log(f"  ERROR: final {final_dur:.2f}s != raw {raw_dur:.2f}s — identity violated")
+        sys.exit(1)
+    log(f"    DONE: {p['final_mp4']} ({final_dur:.2f}s, matches raw)")
+    log("Stage 2 DONE")
 
 
 # ---------- video-subtitle module loader (mirrors cook's pattern) ----------
@@ -794,9 +511,7 @@ def _run_subs(mod, argv):
 
 _STAGES = {
     "synth": stage_synth,
-    "timeline": stage_timeline,
-    "retime": stage_retime,
-    "burn": stage_burn,
+    "assemble": stage_assemble,
 }
 
 
@@ -809,18 +524,16 @@ if __name__ == "__main__":
     name = sys.argv[3] if len(sys.argv) > 3 else None
     flags = [a for a in sys.argv[4:] if a.startswith("--")]
     keep_subs = "--keep-subs" in flags
-    if keep_subs and cmd != "burn":
-        print("--keep-subs applies to the burn stage only")
+    if keep_subs and cmd != "assemble":
+        print("--keep-subs applies to the assemble stage only")
         sys.exit(1)
     if cmd == "full":
         stage_synth(output_root, name)
-        stage_timeline(output_root, name)
-        stage_retime(output_root, name)
-        stage_burn(output_root, name)
+        stage_assemble(output_root, name)
         log("all stages complete")
     elif cmd in _STAGES:
-        if cmd == "burn":
-            stage_burn(output_root, name, keep_subs=keep_subs)
+        if cmd == "assemble":
+            stage_assemble(output_root, name, keep_subs=keep_subs)
         else:
             _STAGES[cmd](output_root, name)
     else:
