@@ -2,8 +2,13 @@
 
 The video is NEVER re-timed: every frame keeps its original timestamp and the
 dubbed release has exactly the raw video's duration. Each cue's synthesized
-audio is fitted into its own original window (cue start → next cue's start)
-with a per-cue atempo — faster or slower synthesis both land in the window.
+audio is placed at its original start; audio that runs past its window (cue
+start → next cue's start) is compressed with atempo, but audio shorter than
+its window is NEVER stretched — it keeps its natural pace and the window gets
+a breathing pause (a 44%-stretch round shipped and was rejected on the spot
+as "robotic"; see SKILL.md Step 5). Long cues (>= CHUNK_ON chars) are
+synthesized as sentence chunks and concatenated — single takes of very long
+text collapse in pace and prosody (the long-line collapse; SKILL.md Step 4).
 Subtitles are generated on the original clock, so there is no "dub clock".
 
 Staged design — each stage writes its outputs to disk, so re-runs resume from
@@ -166,6 +171,54 @@ def cue_window(cues, i, total_dur):
     return nxt - start
 
 
+# Long-cue chunking: single takes above this many chars collapse in pace
+# (rushed, flat) — synthesized as sentence chunks and concatenated instead.
+# Paired with the short-line trap in SKILL.md Step 3a (lines <= 8 syllables
+# render at narration pace): the healthy band runs roughly 10-60 chars;
+# merge short lines up, chunk long lines down.
+CHUNK_ON = 60      # chars above this -> chunked synthesis
+CHUNK_MAX = 70     # merge sentence pieces up to this many chars per chunk
+
+
+def split_chunks(text: str, chunk_max: int = CHUNK_MAX) -> list[str]:
+    """Split a long cue at sentence-final punctuation into <= chunk_max-char
+    pieces; pieces without punctuation are hard-split at commas. Pure — unit
+    tested in tests/test_validation.py."""
+    parts = [q for q in re.split(r"(?<=[。？！；])", text) if q.strip()]
+    out, cur = [], ""
+    for q in parts:
+        if len(cur) + len(q) <= chunk_max:
+            cur += q
+        else:
+            if cur:
+                out.append(cur)
+            cur = q
+    if cur:
+        out.append(cur)
+    final = []
+    for q in out:
+        while len(q) > chunk_max + 20:  # punctuation-less run: comma hard-split
+            cut = q.rfind("，", 0, chunk_max + 20)
+            cut = cut if cut > 20 else chunk_max
+            final.append(q[:cut + 1])
+            q = q[cut + 1:]
+        if q:
+            final.append(q)
+    return final
+
+
+def _concat_wavs(files, dst):
+    """Concatenate wavs (same format) into dst via ffmpeg's concat filter."""
+    cmd = ["ffmpeg", "-y", "-v", "error"]
+    for f in files:
+        cmd += ["-i", str(f)]
+    cmd += ["-filter_complex", f"concat=n={len(files)}:v=0:a=1",
+            "-c:a", "pcm_s16le", str(dst)]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        raise RuntimeError(f"concat failed: {r.stderr[-200:]}")
+
+
 def fit_factor(audio_dur, window):
     """atempo factor that lands the audio exactly in the window.
     1.0 means it already fits. ffmpeg atempo accepts 0.5-100 in one filter;
@@ -242,6 +295,8 @@ def stage_synth(output_root, name: str):
         )
         log(f"loaded in {time.time()-t0:.1f}s (duration_factor={df})")
 
+    chunk_cache = p["work"] / "_chunkcache"
+    chunk_cache.mkdir(parents=True, exist_ok=True)
     t_start = time.time()
     n_done = done
     for i, (idx, s, e, en, zh) in enumerate(cues):
@@ -250,8 +305,19 @@ def stage_synth(output_root, name: str):
             continue
         t1 = time.time()
         ref = refs[speakers[i]] if speakers else p["ref_wav"]
-        tts.infer(spk_audio_prompt=str(ref), text=zh, output_path=str(out),
-                  lang="zh", use_random=False, duration_factor=df)
+        if len(zh) > CHUNK_ON:
+            # long-line collapse guard: synthesize sentence chunks, concat
+            chunks = split_chunks(zh)
+            parts = []
+            for ci, c in enumerate(chunks):
+                cp = chunk_cache / f"c{idx:04d}_{ci:02d}.wav"
+                tts.infer(spk_audio_prompt=str(ref), text=c, output_path=str(cp),
+                          lang="zh", use_random=False, duration_factor=df)
+                parts.append(cp)
+            _concat_wavs(parts, out)
+        else:
+            tts.infer(spk_audio_prompt=str(ref), text=zh, output_path=str(out),
+                      lang="zh", use_random=False, duration_factor=df)
         dur = get_dur(out)
         n_done += 1
         elapsed = time.time() - t_start
@@ -282,12 +348,13 @@ def stage_assemble(output_root, name: str, keep_subs: bool = False):
                 log(f"  ERROR: --keep-subs needs {f} on disk; run a plain assemble first")
                 sys.exit(1)
 
-    # 2a. Fit pass — per-cue atempo into its own window.
-    #     A factor near 1.0 is the norm (the translation was written to a char
-    #     budget, so audio ≈ window). Anything far from 1.0 is a budget miss:
-    #     the sentence's text is wrong for its window, and the fix is editing
-    #     that sentence + re-synthesizing that cue — not more stretching.
-    log("  2a: fit pass (per-cue atempo into original windows)")
+    # 2a. Fit pass — compress-only. Audio longer than its window is atempo'd
+    #     down (it would otherwise collide with the next cue); audio SHORTER
+    #     keeps its natural pace and 2b pads the tail with silence (a
+    #     breathing pause). Time-stretching short audio to fill the window is
+    #     forbidden — slowed TTS reads as robotic, and stretching shipped and
+    #     was rejected three rounds running before the rule landed.
+    log("  2a: fit pass (compress over-window audio only)")
     n_fit = 0
     budget_misses = []
     durs = []
@@ -299,10 +366,10 @@ def stage_assemble(output_root, name: str, keep_subs: bool = False):
         d = get_dur(wav)
         window = cue_window(cues, i, raw_dur)
         factor = fit_factor(d, window)
-        if 0.999 <= factor <= 1.001:
+        if factor <= 1.001:  # fits, or shorter: natural pace + pad (no stretch)
             durs.append(d)
             continue
-        if not (0.67 <= factor <= 1.5):
+        if factor > 1.5:
             budget_misses.append((idx, factor, d, window))
         k = clamp_factor(factor)
         tmp = wav.with_suffix(".fit.wav")
