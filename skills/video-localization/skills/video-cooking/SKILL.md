@@ -95,7 +95,7 @@ If `cook download` fails (auth wall it couldn't crack, network, etc.), stop and 
 
 Pass the `<output-root>` and `<name>` from Step 1, **plus the publish intent from Step 0**. Tell `video-subtitle` explicitly:
 
-> "This run is for upload to `<platforms from Step 0>`. Produce the full shipment: cooked mp4, upload.md with per-platform titles/descriptions/chapters, cloud-srt/ for soft-sub platforms, cooked/cover.jpg. Don't skip cloud-srt or cover — the user is going to upload. The source context at `raw/<name>.source.json` (run `cook show-source` to surface it) has the author, links, and source description — use it for translation context and upload metadata, don't just rely on the transcript. If the Chinese dub will run (Step 3), also produce `transcript/<name>.en.full.srt` via `scripts/make_full_srt.py` — dubbing needs full sentences, not subtitle fragments."
+> "This run is for upload to `<platforms from Step 0>`. Produce the full shipment: cooked mp4, upload.md with per-platform titles/descriptions/chapters, cloud-srt/ for soft-sub platforms, cooked/cover.jpg. Don't skip cloud-srt or cover — the user is going to upload. The source context at `raw/<name>.source.json` (run `cook show-source` to surface it) has the author, links, and source description — use it for translation context and upload metadata, don't just rely on the transcript. If the Chinese dub will run (Step 3), also produce `transcript/<name>.en.full.srt` via `cook make-full-srt` — dubbing needs full sentences, not subtitle fragments."
 
 Without this, `video-subtitle` might treat cloud-srt/ as lazy, forget cover.jpg, or translate purely from the transcript and miss the author/links/description the source platform already provided. The intent handoff is what makes the router produce a publish-ready shipment every time.
 
@@ -115,7 +115,7 @@ Pass `<output-root>` and `<name>`. Tell `video-dubbing`:
 
 > "The bilingual cooked video is done. Produce the Chinese dub for upload to `<platforms from Step 0>` alongside the bilingual release."
 
-`video-dubbing` reads `raw/<name>.raw.mp4` (original audio, for Demucs separation + voice cloning reference) and `transcript/<name>.en.full.srt` (the full-sentence English transcript — produce it in Step 2 via `scripts/make_full_srt.py`; dubbing needs complete sentences not subtitle fragments), and writes its outputs to a new `dubbed/` stage folder plus `cooked/<name>.dubbed.mp4`. It does not modify anything `video-subtitle` produced.
+`video-dubbing` reads `raw/<name>.raw.mp4` (original audio, for Demucs separation + voice cloning reference) and `transcript/<name>.en.full.srt` (the full-sentence English transcript — produce it in Step 2 via `cook make-full-srt`; dubbing needs complete sentences not subtitle fragments), and writes its outputs to a new `dubbed/` stage folder plus `cooked/<name>.dubbed.mp4`. It does not modify anything `video-subtitle` produced.
 
 **The `--python` flag is mandatory when IndexTTS2 lives in a separate venv** (the common case — its heavy deps like torch are isolated from cook's own Python). Every `cook dub` command takes it; resolving the venv is video-dubbing's Step 0.
 
@@ -141,6 +141,7 @@ Three points in the pipeline seal human-readable content — the ASR-audited Eng
 
 - **Fresh subagent, not the router agent.** The router agent is anchored on the work it just produced. Spawn a new subagent for the review so the read is independent.
 - **Read every cue end to end.** Read the whole SRT/ASS, in order, in context. The review principle is "read every proper noun in context and confirm it via web search" — **not** "search for a memorized list of known error signatures." Pattern-matching known errors misses novel ones; reading every line in context catches them.
+- **Verdict calibration (bake into every reviewer prompt):** flag **word-level defects only** — grammar breaks, wrong words, split tokens, duplicates, misspellings. Speaker verbatim (false-starts, stammer repeats, resumptive pronouns), style inconsistencies (hyphenation, capitalization conventions), and previously-ruled keepers are NOT defects. Without this clause fresh reviewers trickle one-word findings across rounds (a 431-cue transcript took 4 rounds to converge 6→2→2→0; the calibration only entered the prompt at round 4).
 - **What to flag:**
   - **Split words across cues** — a word broken at a cue boundary that should be one token.
   - **Adjacent duplicate lines** (Gate A) — the same cue repeated back-to-back.
@@ -159,6 +160,7 @@ These bind every stage, no exceptions.
 - **Sample before batch.** Any operation applied to N files (atempo factors, renames, regex edits) runs on 2-3 samples first, with the result printed and direction/numerics verified before the batch runs.
 - **Homegrown tools ship with assertions.** Scripts written during a run (timeline adjusters, merge planners) must assert their invariants on real data (tiling, monotonicity, no-overlap) and refuse on violation — otherwise they fail silently downstream.
 - **Destructive batches get a manifest first.** Deleting or overwriting more than a couple of files requires a list ("these N files, because X") shown to the user for a nod.
+- **Heavy stages never run back-to-back.** Model loads (whisperX, faster-whisper, IndexTTS2), multi-GB reads (assembly re-reads every take), and video encodes each saturate disk IO and memory on their own; chained with no gap they froze the whole session once. Space them (a sleep between stage launches, staggered worker starts) the way `cook dub synth --stagger` staggers model loads. This binds subagent parallelism too: one model-loading or batch-audio agent at a time; unit-test-only agents may run concurrently.
 - **Restate ambiguous instructions.** When the user's direction could mean two things ("adjust the short sentences" — the audio? the video?), say the interpretation back in one sentence before acting.
 - **Long tasks get a watcher and a scheduled reporter.** Whenever a stage runs longer than ~30 min (transcribe, dub synth, assemble), attach monitoring (the stage's log + product counts) AND create a scheduled in-session report every 30 minutes (progress, measured ETA from the log, anomalies) that tears down on completion. If the session restarts, re-attach both: find the stage's log under the per-video dir, count the products (e.g. `sent_*.wav` vs cue count) to locate the resume point, and re-create the 30-minute reporter — the cook process itself survives the restart (Windows doesn't kill orphaned children); the watcher and reporter do not.
 - **Quote dub time by cue count** (formula lives in the Time budget row below), never by video length.

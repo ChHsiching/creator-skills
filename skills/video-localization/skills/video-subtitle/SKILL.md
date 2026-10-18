@@ -5,7 +5,7 @@ description: Turn a foreign-language raw video into a bilingual (or single-langu
 
 Turn a **raw** video (foreign audio, no subtitles) into a **cooked** video with bilingual or single-language subtitles. The agent does the translation itself — no external translation API.
 
-Deterministic execution (audio extraction, transcription, subtitle processing, burning) is handled by the [`cook`](https://github.com/ChHsiching/video-cook) CLI. The agent focuses on the creative work the CLI can't do: translation, copywriting, quality judgment. If `cook` is not installed, the scripts in `scripts/` still work directly — see REFERENCE.md.
+Deterministic execution (audio extraction, transcription, subtitle processing, burning) is handled by the [`cook`](https://github.com/ChHsiching/video-cook) CLI. The agent focuses on the creative work the CLI can't do: translation, copywriting, quality judgment. If `cook` is not installed, install it — `pip install video-cook[all]` carries every stage script.
 
 ## What you produce
 
@@ -51,7 +51,6 @@ Every video's outputs go into a per-video subdirectory, split into folders named
 │   ├── <name>.cooked.{,bar.}mp4
 │   ├── <name>.upload.md
 │   └── cover.jpg
-└── scripts/                        any helper scripts you write for this run
 ```
 
 Rules:
@@ -108,6 +107,8 @@ cook extract <output-root> <name>
 
 Produces `transcript/<name>.audio.wav` (16kHz mono WAV, the format whisperX needs).
 
+Cook's download picks the max-bitrate video stream within the target resolution (codec priority vp9 > h264 > av01 — an av01 stream at the same resolution can carry half the vp9 twin's bitrate) and records the landed codecs in `source.json` under `cargo.video_codec`/`audio_codec`. Verify `cargo` after download; av01 where a vp9 stream existed means re-running `cook download`.
+
 Done when `cook extract` exits 0. (The old manual `ffmpeg -y -i ... -vn -ac 1 -ar 16000 -c:a pcm_s16le ...` is what cook runs internally — see REFERENCE.md if you need to run it without cook.)
 
 ### Step 2 — Transcribe (the slow step)
@@ -160,7 +161,7 @@ This surfaces the original title, uploader, channel, links, duration, and crucia
 - **Understand the video's structure before you start.** The description's chapter outline (if present) tells you the arc of the video, so you translate section transitions with the right framing.
 - **Match the author's own terminology.** If the description calls something a "crash course", your translation should reflect that, not invent a different term.
 
-Write translations to `transcript/translations.txt` — **one Chinese line per English cue, line N = cue N** (1-based). Keep the line count exactly equal to the cue count. A helper script (`scripts/make_zh.py` or similar) reads translations.txt + en.srt's timestamps and emits `<name>.zh.srt`. This avoids hand-writing timestamps.
+Write translations to `transcript/translations.txt` — **one Chinese line per English cue, line N = cue N** (1-based). Keep the line count exactly equal to the cue count. `cook make-zh` reads translations.txt + en.srt's timestamps and emits `<name>.zh.srt`, avoiding hand-writing timestamps.
 
 The English SRT is your **source of meaning and timing**, not a rigid grid to fill cell-by-cell. whisperX cuts on speech pauses, which often splits one sentence across 2-3 cues or merges two sentences into one. Your Chinese cues must follow **Chinese sentence boundaries**, not the English cue boundaries. A viewer reads the Chinese — if it's chopped into word-fragments to match English pauses, it's unreadable.
 
@@ -191,7 +192,7 @@ Exit 0 = perfectly aligned. Non-zero = `missing_translations` and/or `extra_tran
 
 Done when `<name>.zh.srt` exists, `cook verify-align` exits 0, `transcript/asr-fixes.md` lists every ASR error you fixed, and both review passes above passed. (Note: cue count matching is enforced by verify-align, not by hand-counting — the translator may legitimately merge short cues, and the downstream `biliteral` merge handles mismatched counts via timestamp-union.)
 
-**Optional: produce `<name>.en.full.srt` for downstream dubbing.** whisperX cuts on speech pauses, producing fragment cues that often split one sentence across 2-3 cues. This is fine for subtitles (each fragment displays briefly), but `video-dubbing` needs **complete sentences** — it synthesizes TTS per cue, and a fragment like "and the" synthesizes badly. If the run might continue to dubbing, produce `<name>.en.full.srt` by running `scripts/make_full_srt.py` from the per-video root — it merges `en.srt`'s fragment cues at sentence-ending punctuation (`. ! ?`) into full-sentence cues. The cue count drops (e.g. 151 fragments → 141 sentences for an 11-min video). `video-dubbing` reads this file and translates it separately into `translations_dub.txt` — the dub script, distinct from this step's subtitle translation because the two have different constraints (subtitles tolerate fragmentation; dubbing requires complete thoughts). Skip this if dubbing won't run.
+**Optional: produce `<name>.en.full.srt` for downstream dubbing.** whisperX cuts on speech pauses, producing fragment cues that often split one sentence across 2-3 cues. This is fine for subtitles (each fragment displays briefly), but `video-dubbing` needs **complete sentences** — it synthesizes TTS per cue, and a fragment like "and the" synthesizes badly. If the run might continue to dubbing, produce `<name>.en.full.srt` with `cook make-full-srt` — it merges `en.srt`'s fragment cues at sentence-ending punctuation (`. ! ?`) into full-sentence cues. The cue count drops (e.g. 151 fragments → 141 sentences for an 11-min video). `video-dubbing` reads this file and translates it separately into `translations_dub.txt` — the dub script, distinct from this step's subtitle translation because the two have different constraints (subtitles tolerate fragmentation; dubbing requires complete thoughts). Skip this if dubbing won't run.
 
 ### Step 4 — Subtitles (shorten + merge-short + bilateral + ASS + cloud-srt)
 
@@ -236,12 +237,25 @@ If you haven't already, run `cook show-source <output-root> <name>` to pull the 
 
 **No Markdown formatting in the copy-paste content.** Platforms like Bilibili don't render Markdown — `**bold**` shows as literal asterisks, and `-` list markers show as literal hyphens. Use plain text with line breaks. List items use the real character `·` (or numbered `1. 2. 3.`), never markdown `-`. The upload.md file itself can use Markdown headings and `-` to organize its own sections (those are notes for you, not pasted to platforms); only the content inside the paste-blocks (fenced ```` ``` ````) must be plain text with `·`.
 
-**Titles — provide multiple, per platform:**
-- **B站**: professional, shows what the video is about. Up to ~30 chars. Include the author's identity (from source context `uploader`/`channel`) if recognizable.
-- **小红书**: ≤20 characters. Same professional tone as B站, just shorter. Don't use marketing language ("大佬带你", "效率翻倍").
+**Titles — the house skeleton, then your candidates.** Study the channel's own published titles first (the user's Bilibili upload page is the canon; pull the latest 20-30 and read them before writing). The house skeleton they all follow:
+
+```
+[名头/主体] [内容类型词]：[具体做法或事实，数字/命令名直接上]丨[第二卖点或活动名]
+```
+
+- 名头先行：可查证的作者身份，取自 source context 的 `uploader`/`channel`/`uploader_url`（`Matt Pocock 直播：` / `在 SpaceX 造 Grok Bot 的人`）。生面孔必须先立身份再报内容。
+- 内容类型词定性：直播 / 实战教程 / 讲座 / 演讲 / 科普 / 播客。
+- 冒号后是**具体做法或事实**——数字、命令名、机制名直接写（`使用 /pr skill 审核 AI 生成的 PR` / `一个月发 2000 个 PR`），不是关键词罗列也不是空壳句式。
+- `丨` 后挂第二信息点或活动名（`AI Engineer Paris 2026` / 具体机制）。
+
+**Write each candidate as one sentence a developer reads and knows what they'll get.** The failure modes (each shipped once and was rejected): the empty shell ("AI 代码审查实践分享" — swap any noun, still "works"), the keyword dump ("休眠唤醒、云电脑、持久工作流" — terms without a sentence), the colloquial metaphor dressing a technical lecture ("AI 下班了还在干活"), and the circular benefit ("懂原理才会用" — says nothing). For a technical lecture, name the content type (架构讲解/实现原理) + what the viewer walks away able to DO.
+
+**Per platform:**
+- **B站**: house skeleton above; ~25-35 chars is the band.
+- **小红书**: ≤20 characters, same skeleton compressed (`Grok Bot 实现原理，开发者亲讲`).
 - **YouTube**: can include "(双语字幕)" or the English title variant (from source context `title`).
 
-The title should tell the viewer **what happens in the video** (e.g. "从零搭建一个全新项目"), not use jargon they'd need the description to understand.
+Present 3-5 candidates across different angles (直述/数字/反差/引语); the user picks or rewrites — their choice is final.
 
 **Description — provide three versions:**
 1. **Full version (B站/YouTube)**: a fixed five-part structure, in this order —

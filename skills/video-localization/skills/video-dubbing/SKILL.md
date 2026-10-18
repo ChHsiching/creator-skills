@@ -5,7 +5,7 @@ description: Replace a video's original English vocals with Chinese voiceover on
 
 Replace a video's original English vocals with **Chinese voiceover** on an **identity timeline**: the video is never re-timed — every frame keeps its original timestamp and the dubbed release has exactly the raw video's duration. Each cue's synthesized audio is fitted into its own original window (cue start → next cue's start) with a per-cue atempo; faster or slower synthesis both land in the window. The result is a second release — same picture at the same speed, Chinese audio, bilingual ZH+EN subtitles burned in.
 
-This skill does the two creative parts the CLI can't: **translating for dubbing** (complete sentences written to a char budget, not the subtitle fragmentation) and **running the quality gates** (length gate, cold review, ear gate, post-burn review). Deterministic execution (Demucs, IndexTTS2, assembly, ffmpeg) is handled by the [`cook`](https://github.com/ChHsiching/video-cook) CLI's `cook dub` subcommand, with this skill's `scripts/` as a fallback.
+This skill does the two creative parts the CLI can't: **translating for dubbing** (complete sentences written to a char budget, not the subtitle fragmentation) and **running the quality gates** (length gate, cold review, ear gate, post-burn review). Deterministic execution (Demucs, IndexTTS2, assembly, retime, ffmpeg) is handled by the [`cook`](https://github.com/ChHsiching/video-cook) CLI's `cook dub` subcommand. All stage scripts live inside the cook package (`stages/dub/`); every invocation below is a `cook` command. `pip install -U video-cook` once upgrades everything.
 
 ## When to reach for this skill
 
@@ -59,7 +59,7 @@ Rule: **`dubbed/` is the working directory; `cooked/<name>.dubbed.mp4` and `clou
 
 ## The pipeline
 
-Two stages after the creative work: **synth** then **assemble**, implemented in `scripts/full_dub.py` and invoked through cook:
+Two stages after the creative work: **synth** then **assemble**, invoked through cook:
 
 ```
 cook dub synth    <root> <name> --python <indextts-venv>/Scripts/python.exe
@@ -86,7 +86,7 @@ cook runs each dub stage as a subprocess under the IndexTTS2 venv via `--python`
 <indextts-venv>/Scripts/python -c "from indextts.infer_v2_5 import IndexTTS2; import demucs, whisperx; print('ok')"   # indextts (v2.5) + demucs + whisperx
 ```
 
-**0b. Single-thread constraint.** IndexTTS2 must run single-threaded (`OMP_NUM_THREADS=1`), or it produces garbage audio. `full_dub.py` sets this internally before importing torch, so you don't need to export it yourself.
+**0b. Single-thread constraint.** IndexTTS2 must run single-threaded (`OMP_NUM_THREADS=1`), or it produces garbage audio. cook sets this internally before importing torch, so you don't need to export it yourself.
 
 Done when cook's doctor reports whisperX/yt-dlp/ffmpeg installed, the IndexTTS2 venv imports `indextts` (v2.5) + `demucs` + `whisperx`, and you know the absolute path to `<indextts-venv>/Scripts/python.exe` to pass as `--python`.
 
@@ -109,12 +109,11 @@ Done when `dubbed/vocals.wav` AND `dubbed/no_vocals.wav` both exist with duratio
 IndexTTS2 needs a **14-30 second** clean clip of the original speaker — it reads at most the first 15s, so a full-cap window beats a short one. IndexTTS2 clones **prosody, not just timbre**: the window's delivery pace becomes the whole dub's delivery pace. The default picker takes the longest continuous speech, which tends to select the slowest, most deliberate passage — often wrong. Prefer the scanner:
 
 ```bash
-<indextts-venv>/Scripts/python <skill>/scripts/scan_reference.py \
-    <output-root>/dubbed/vocals.wav --out <output-root>/dubbed/_reference/ \
-    [--full-band <output-root>/raw/<name>.raw.mp4]
+cook dub scan-reference <output-root> <name> \
+    [--full-band] [--python <indextts-venv>/Scripts/python.exe]
 ```
 
-It ranks fixed 15s windows by syllable rate (density- and pause-filtered) and cuts the top 3 candidates (plus full-band 48k copies with `--full-band`). Density is only half the story — IndexTTS2 clones the window's prosody too, so rank candidates by **liveliness** as well: pyin F0 std and semitone range per window (a flat window dubs flat; use `librosa.pyin`, NOT `detect_pitch_frequency`, which reports voicing on silence). Authenticate any legacy reference file before reusing it: a reprocessed derivative keeps its speaker embedding and pitch statistics but loses waveform correlation, so correlation near zero does NOT mean "different speaker" — score it against an anchor clip with `scan_reference.py --score <file> --anchor <anchor.wav>` (same-speaker real audio lands near 0.94; synthesized takes 0.66-0.76 is the normal band) and compare pyin stats. Either way: **the user's ear picks the reference, always** — synthesize the pilot sentences once per candidate (Step 3a), prescreen each take with a small-model ASR round-trip (dropped words flag garble; traditional-Chinese output flags an accent the window bleeds into the take), score with `scan_reference.py --score`, then hand the loudness-matched wavs to the user.
+It ranks fixed 15s windows by syllable rate (density- and pause-filtered) and cuts the top 3 candidates (plus full-band 48k copies with `--full-band`). Density is only half the story — IndexTTS2 clones the window's prosody too, so rank candidates by **liveliness** as well: pyin F0 std and semitone range per window (a flat window dubs flat; use `librosa.pyin`, NOT `detect_pitch_frequency`, which reports voicing on silence). Authenticate any legacy reference file before reusing it: a reprocessed derivative keeps its speaker embedding and pitch statistics but loses waveform correlation, so correlation near zero does NOT mean "different speaker" — score it against an anchor clip with `cook dub scan-reference --score <file> --anchor <anchor.wav>` (same-speaker real audio lands near 0.94; synthesized takes 0.66-0.76 is the normal band) and compare pyin stats. Either way: **the user's ear picks the reference, always** — synthesize the pilot sentences once per candidate (Step 3a), prescreen each take with a small-model ASR round-trip (dropped words flag garble; traditional-Chinese output flags an accent the window bleeds into the take), score with `cook dub scan-reference --score`, then hand the loudness-matched wavs to the user.
 
 Done when `dubbed/_reference/ref.wav` exists, is 14-30s, and has no silence gap > 0.3s (`ffmpeg -af silencedetect`).
 
@@ -124,7 +123,7 @@ This is where dubbing diverges from subtitles. **Do not use `translations.txt`**
 
 Read `<output-root>/transcript/<name>.en.full.srt` (the full-sentence English transcript). Translate each cue yourself, writing to `transcript/translations_dub.txt` — **one Chinese line per English cue, line N = cue N**.
 
-**The char budget rule — the core of dub translation.** Each cue's budget is `window seconds × normal speech rate`, fixed **before** you write: the window is cue start to the next cue's start (window + following pause), the rate is a normal reading pace (~4.5-5 syllables/s; a given reference clip measured once at the pilot is a fine rate too — same voice + same `DUB_DURATION_FACTOR`, reusable across videos). Write **to the budget**: slightly over is fine, notably under is not — a short take now keeps its natural pace and leaves a breathing pause, so under-budget text means dead air and over-budget text means audible compression. **Recalibrate on any reference or duration-factor change**: a budget calibrated to a retired reference survives every gate and still dubs to dead air. Synthesize a stratified probe (5-10 typical cues per speaker across length bands) and re-check the script against windows at the measured rates — procedure in **[REFERENCE.md → "Rate recalibration"](REFERENCE.md)**. How to fill a budget legitimately (and what "filling" is *not* allowed to invent): **[REFERENCE.md → "Filling the char budget"](REFERENCE.md)**.
+**The char budget rule — the core of dub translation.** Each cue's budget is `window seconds × normal speech rate`, fixed **before** you write: the window is cue start to the next cue's start (window + following pause), the rate is **measured, never assumed** — `cook dub measure-rate` on the pilot takes the user picked (procedure: Step 3a). An assumed rate passes every gate and dubs to seconds of dead air: a 45-min lecture budgeted at an assumed 5.0 chars/s against a real 6.93 left 83 cues with >2.5s of silence and cost an 82-cue re-synthesis. Write **to the budget**: slightly over is fine, notably under is not — a short take now keeps its natural pace and leaves a breathing pause, so under-budget text means dead air and over-budget text means audible compression. **Recalibrate on any reference or duration-factor change**: a budget calibrated to a retired reference survives every gate and still dubs to dead air. Synthesize a stratified probe (5-10 typical cues per speaker across length bands) and re-check the script against windows at the measured rates — procedure in **[REFERENCE.md → "Rate recalibration"](REFERENCE.md)**. How to fill a budget legitimately (and what "filling" is *not* allowed to invent): **[REFERENCE.md → "Filling the char budget"](REFERENCE.md)**.
 
 **Translation principles** (beyond the budget):
 
@@ -137,9 +136,7 @@ Read `<output-root>/transcript/<name>.en.full.srt` (the full-sentence English tr
 Then generate the pre-assembly SRT (timestamps inherited from `en.full.srt`):
 
 ```bash
-python <skill>/scripts/make_zh_dub_srt.py <output-root>/transcript/<name>.en.full.srt \
-    <output-root>/transcript/translations_dub.txt \
-    <output-root>/transcript/<name>.zh.dub.srt
+cook dub make-srt <output-root> <name>
 ```
 
 **Self-review — two passes, before the mechanical gate:** read every line aloud in your head as a spoken sentence (does it sound like something a person would say?); then scan the term list below against every line (anything on-screen stays English, standard concepts go Chinese). These are you checking your own work; the subagent review below is the cold read.
@@ -147,10 +144,10 @@ python <skill>/scripts/make_zh_dub_srt.py <output-root>/transcript/<name>.en.ful
 **Length gate — mechanical** (pure arithmetic, takes a second):
 
 ```bash
-python <skill>/scripts/length_gate.py <output-root> <name>
+cook dub gate <output-root> <name> --rate <measured chars/s>
 ```
 
-It cross-checks every line against its cue window three ways: **short lines** (≤8 syllables — IndexTTS2's narration-pace trap, rewrite fuller or let Step 3a merge), **budget misses** (estimated speech far over its window — text must be cut back — or far under — the window gets dead air, fill it), and the **coverage total** (Σ estimated speech / Σ windows — a uniformly thin translation passes every line check and still dubs to long silences; healthy 90-105%). Exit 1 lists the lines and the coverage verdict; rewrite and rerun until it passes.
+It cross-checks every line against its cue window three ways: **short lines** (≤8 syllables — IndexTTS2's narration-pace trap, rewrite fuller or let Step 3a merge), **budget misses** (estimated speech far over its window — text must be cut back — or far under — the window gets dead air, fill it), and the **coverage total** (Σ estimated speech / Σ windows — a uniformly thin translation passes every line check and still dubs to long silences; healthy 90-105%). `--rate` is **required** (the measured value; `--self-measure` re-derives it from existing takes). Exit 1 lists the lines and the coverage verdict; rewrite and rerun until it passes. An over-budget line is fixed by rewriting shorter or folding into its neighbour with `cook dub merge` — never by leaving it to be atempo-compressed.
 
 **Quality gate — fan-out subagent review (mandatory, before synth).** The ear gate and this review are the only gates before hours of synthesis. Fan out a subagent with read access to both `<name>.en.full.srt` and `translations_dub.txt`, and ask it to check, for every cue:
 
@@ -164,10 +161,10 @@ Done when `translations_dub.txt` has the same line count as `en.full.srt` cues, 
 
 ### Step 3a — Pace the script and win the ear gate
 
-IndexTTS2 renders standalone short lines (≤8 ZH syllables) at narration pace, regardless of the reference clip (the length gate's **short-line trap**). Banter-heavy talks are full of such lines. Handle them BEFORE synth: **write fuller sentences while translating** ("这一段是真的太熬人了" not "太熬人了"), then run `python <skill>/scripts/build_merge.py <output-root> <name>` to merge what remains short into 9-24-syllable units (backs up originals as `*.v1`, pre-populates the synth cache; merged groups must keep the SAME reference clip). Re-run `make_zh_dub_srt.py` after merging. The mirror end of the same rule is the **long-line collapse**: single takes of roughly 60+ chars speed up and flatten — the synth stage chunks those automatically (Step 4). Cue length has a healthy band of roughly 10-60 chars: merge short lines up, let long ones be chunked down, write inside the band when the window allows.
+IndexTTS2 renders standalone short lines (≤8 ZH syllables) at narration pace, regardless of the reference clip (the length gate's **short-line trap**). Banter-heavy talks are full of such lines. Handle them BEFORE synth: **write fuller sentences while translating** ("这一段是真的太熬人了" not "太熬人了"), then run `cook dub merge-short <output-root> <name>` to merge what remains short into 9-24-syllable units (backs up originals as `*.v1`, pre-populates the synth cache; merged groups must keep the SAME reference clip). Re-run `cook dub make-srt` after merging. For **manual** merges (e.g. folding an over-budget line into its neighbour) use `cook dub merge <output-root> <name> --group "a,b"` — it edits `en.full.srt` and `translations_dub.txt` **together** under pairing invariants; a one-sided hand merge once misaligned 8 cues by a full sentence and no text gate caught it. The mirror end of the same rule is the **long-line collapse**: single takes of roughly 60+ chars speed up and flatten — the synth stage chunks those automatically (Step 4). Cue length has a healthy band of roughly 10-60 chars: merge short lines up, let long ones be chunked down, write inside the band when the window allows.
 
 **Ear gate — two tiers.** Synthesis costs ~3.5 min per cue and nothing downstream hears audio — the only gate before that spend is the user's ear.
-**Pilot gate (raw takes — picks voice and pace):** a temp output-root holding a 3-line `en.full.srt` + `translations_dub.txt` (a short interjection, a mid sentence, a long one — the same tiers the real script has), the candidate `ref.wav` in `dubbed/_reference/`, then `cook dub synth` on it (~10 min). Hand the loudness-matched wavs to the user and get an explicit OK on voice AND pace. The pilot doubles as the reference's rate measurement for Step 3's budget — one pilot, two jobs. Delivery pace is also tunable globally via the `DUB_DURATION_FACTOR` env (IndexTTS2 `duration_factor`; ~0.85 is a brisk pace, 1.0 neutral) — set it before synth; same value must have been behind any rate the budget used.
+**Pilot gate (raw takes — picks voice and pace):** a temp output-root holding a 3-line `en.full.srt` + `translations_dub.txt` (a short interjection, a mid sentence, a long one — the same tiers the real script has), the candidate `ref.wav` in `dubbed/_reference/`, then `cook dub synth` on it (~10 min). Hand the loudness-matched wavs to the user and get an explicit OK on voice AND pace. The pilot doubles as the rate measurement for Step 3's budget: once the user picks a voice, run `cook dub measure-rate` on the winning pilot takes and feed that number to every `cook dub gate` call — one pilot, two jobs. Delivery pace is also tunable globally via the `DUB_DURATION_FACTOR` env (IndexTTS2 `duration_factor`; ~0.85 is a brisk pace, 1.0 neutral) — set it before synth; same value must have been behind any rate the budget used.
 **Delivery gate (assembled product — the final say):** raw takes are not what ships — the fit pass, the loudness bed, and the encode all sit between a pilot and the video, and a round of raw-take approvals once shipped a video rejected on the spot as robotic. Before declaring the dub done, cut the ear-check samples **from the assembled `cooked/<name>.dubbed.mp4` itself**, and include the longest cue you have — long-take collapse and assembly artifacts only show up there.
 
 Done when `*.v1` backups exist (when merging ran), line count equals cue count post-merge, `<name>.zh.dub.srt` is regenerated, and the ear gate has an explicit user OK on voice AND pace.
@@ -175,12 +172,13 @@ Done when `*.v1` backups exist (when merging ran), line count equals cue count p
 ### Step 4 — Synthesize the Chinese dub (the slow step)
 
 ```
-cook dub synth <output-root> <name> --python <indextts-venv>/Scripts/python.exe
+cook dub synth <output-root> <name> --python <indextts-venv>/Scripts/python.exe \
+    [--workers N --stagger S]
 ```
 
-`stage_synth` loads IndexTTS2 once, then synthesizes each cue single-threaded (Step 0b; **[REFERENCE.md → "The single-thread constraint"](REFERENCE.md)**). Cues over ~60 chars are automatically split at sentence punctuation into ≤70-char chunks, synthesized separately, and concatenated (the long-line collapse guard; chunk cache in `dubbed/_full/_chunkcache/`) — a 158-char single take measured 10.3 chars/s against the 5.7 its window was budgeted for. Output is `dubbed/_full/_segments/sent_NNNN.wav`, cached by cue index — the cache is **NOT text-aware**: a cue whose text (or reference) changed re-synthesizes only after you delete its cached wav.
+`--workers N` runs N-1 band workers alongside the ascending supervisor (each descends its band; `--stagger S` seconds spaces their model loads — N simultaneous IndexTTS2 loads spike disk IO and memory, the user's standing constraint). Each process (supervisor or band worker) loads IndexTTS2 once and synthesizes single-threaded (Step 0b; **[REFERENCE.md → "The single-thread constraint"](REFERENCE.md)** — the constraint is per-process, not global). Cues over ~60 chars are automatically split at sentence punctuation into ≤70-char chunks, synthesized separately, and concatenated (the long-line collapse guard; chunk cache in `dubbed/_full/_chunkcache/`) — a 158-char single take measured 10.3 chars/s against the 5.7 its window was budgeted for. Output is `dubbed/_full/_segments/sent_NNNN.wav`, cached by cue index — the cache is **NOT text-aware**: a cue whose text (or reference) changed re-synthesizes only after you delete its cached wav.
 
-**After synth, before assemble — per-cue loudness matching:** `python <skill>/scripts/loudness_match.py <output-root> <name>` pulls every cue to the -18.7 LUFS anchor with -1.5 dBFS peak protection. The assembler's global loudnorm lands the track, not the voices — two clone references can sit 25 dB apart, and only per-cue matching closes that spread. Skipping it is how one speaker ends up a whisper.
+**After synth, before assemble — per-cue loudness matching:** `cook dub loudness-match <output-root> <name>` pulls every cue to the -18.7 LUFS anchor with -1.5 dBFS peak protection. The assembler's global loudnorm lands the track, not the voices — two clone references can sit 25 dB apart, and only per-cue matching closes that spread. Skipping it is how one speaker ends up a whisper.
 
 **Cost is per CUE, not per minute of video** (~3.5 min/cue regardless of length; 240 cues ≈ 14h). Quote the user `cues × 3.5 min` before starting. The synth log's completion line is `Stage 1 DONE: <n> cues synthesized`.
 
@@ -194,7 +192,9 @@ cook dub assemble <output-root> <name> --python <indextts-venv>/Scripts/python.e
 cook dub assemble <output-root> <name> --python <indextts-venv>/Scripts/python.exe --keep-subs
 ```
 
-One command, six moves (each logged with its `2a`-`2f` step letter):
+One command, seven moves (each logged with its step letter) — the seventh is **retime**, on by default since cook's 2026-10 reflux:
+
+- **Retime — subtitles follow the voice, not the window.** After the biliteral union and before the ASS build, `cook dub retime` runs in-process: word timestamps from the clean per-cue VO pads place each display cue at its spoken moment, with exact end-to-next-start handover (a 20ms gap blanks a frame at 30fps — the visible blink). Timing sources and mechanics: **[REFERENCE.md → "Retime timing sources"](REFERENCE.md)**. JSON reports `retime: applied|degraded|skipped`; `--no-retime` reverts to the proportional spread (long cues drift seconds late).
 
 - **Fit pass — compress only, never stretch.** Audio that runs past its window (cue start → next cue's start) is atempo'd down to fit; audio shorter than its window keeps its natural pace and the window gets a breathing pause (2b pads the tail with silence). Time-stretching short audio to fill a window is forbidden — slowed TTS reads as robotic, and stretch-to-fill shipped and was rejected three runs running before this rule landed. A compression factor over 1.5 logs a **budget-miss warning naming the cue** — the fix is editing that sentence and re-synthesizing that cue — never re-timing the video instead (why: **[REFERENCE.md → "The retired re-timing path"](REFERENCE.md)**).
 - **Place** — cues at their original starts, silence in between; `dub.wav` comes out exactly the raw duration (asserted; the stage aborts rather than emit a different-length track).

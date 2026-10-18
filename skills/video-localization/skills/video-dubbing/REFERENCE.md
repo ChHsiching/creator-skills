@@ -34,7 +34,7 @@ torch.set_num_interop_threads(1)
 from indextts.infer_v2_5 import IndexTTS2
 ```
 
-**Order matters**: the env vars must be set before any numerical library imports. Setting them after torch loads has no effect. Every script in `scripts/` does this at the top.
+**Order matters**: the env vars must be set before any numerical library imports. Setting them after torch loads has no effect. cook's stage code does this at the top.
 
 Cost: RTF jumps from ~5 (multi-thread, broken) to ~30-36 (single-thread, correct). A 141-cue video takes ~8 hours on a Ryzen CPU (~3.5 min per cue — see SKILL.md Step 4 for the per-cue cost model). This is unavoidable — there is no "fast and correct" mode.
 
@@ -223,7 +223,7 @@ trusting an existing script against a new voice:
    arithmetic the length gate does, with the measured rates in place of its
    generic planning bands. Lines under ~88% of their window budget need
    expansion (see "Filling the char budget"); lines over ~105% need cuts.
-4. The generic bands baked into `length_gate.py` (3.0/4.2/4.9) are planning
+4. The generic bands baked into `cook dub gate` (3.0/4.2/4.9) are planning
    defaults, not physics — measured rates from the actual voice override them.
 
 ## IndexTTS2 sampling — the live knobs
@@ -253,7 +253,7 @@ concluded "not the same voice" from correlation -0.05; the file scored 0.9438
 speaker-embedding cosine against a same-speaker anchor and its pyin stats
 matched the source window almost exactly). To authenticate a reference file:
 
-- `scan_reference.py --score <file> --anchor <real-clip-of-the-speaker>` —
+- `cook dub scan-reference --score <file> --anchor <real-clip-of-the-speaker>` —
   same-speaker real audio lands near 0.94; synthesized takes 0.66-0.76.
 - pyin F0 median/std/range vs the claimed source window (resampling moves
   them little; heavy processing flattens std).
@@ -294,4 +294,16 @@ default window". `full_dub.cue_window` derives it from the raw duration; any
 ad-hoc script that recomputes windows (budget checkers, expansion
 worklists) must do the same from the ffprobe duration. A hardcoded fallback
 constant produced a 5x-overwindow closing line that had to be rewritten and
-re-synthesized on the spot.
+re-synthesized on the spot.
+
+
+
+## Retime timing sources
+
+Three timing sources shipped wrong subtitle times before the right one was found; all three are banned:
+
+1. **Energy probes on the mix** — `dub.wav` and the burned video carry the -18dB BGM bed, so "silence detection" finds music, not pauses. Reading spans measured this way are fiction. Only the per-cue `_audio_pad/cue_NNNN.wav` files (VO plus silence, zero BGM) are clean probe material.
+2. **whisperX CTC char alignment** — the wav2vec2 aligner drifts on trailing silence (a 57-char take drifted 1.78s late; dual-render measurement against the original take proved 6.60s actual). Do not use `whisperx.align` char timestamps as a subtitle clock.
+3. **Mixed-track ASR word timestamps** — faster-whisper on the BGM mix runs 1-3.5s late systematically. The same model on the clean pads is accurate; the mix is the poison.
+
+The shipped source: **faster-whisper (small/int8) word timestamps on each clean pad**, characters mapped to word times via monotonic matching, display cue start = first-character time −0.05s, dwell cues inherit the previous start, and **end == next start exactly** (the original 20ms guard gap blanked one frame per cue switch at 30fps — visible as a blink; libass renders the exact handover seamlessly).
