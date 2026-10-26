@@ -142,13 +142,19 @@ ffmpeg -i no_vocals.wav -af volumedetect -f null - 2>&1 | grep mean_volume
 
 The assemble stage auto-detects this (mean > -50dB mixes a -18dB bed under the dub); check first if you're mixing manually, or you'll amplify silence.
 
+### Window-level bed dropout (Demucs misroute)
+
+The whole-track mean passes while individual windows go silent: Demucs sometimes routes title stings and transition swells into the **vocals** stem, so `no_vocals` carries almost none of them. The assemble's mean check sees a real BGM bed, the dub replaces the vocals stem (which held the sting), and a 20-second title card ships as near-absolute silence. Detect by scanning windows, not means: bucket the original and the dubbed **video's audio track** into 5s windows and flag any bucket where the original carries energy (>50% frames above threshold) while the dub is near-silent (<15%).
+
+Repair in the final mix by **adding, never replacing**: amplify `no_vocals` over the affected window (+9 to +12 dB, level-matched to the neighbouring bed windows, 0.2s fades) and sum it into the dubbed audio, watching peaks (limiter if the summed track clips), then remux with the video stream copied. Replacing the window with any stem or the raw mix fails two ways — it buries the dubbed voice that lives there, and the raw mix contains the original speech undubbed (leaked as untranslated background once). The additive bed sits under the dub; the sting comes back; no English leaks.
+
 ## Chinese-dub quality self-check
 
 After burning, listen for these failure modes:
 
 - **洋腔 (foreign accent)** — the Chinese sounds like a non-native speaker. If severe, the reference audio was too English-heavy; try a different reference clip or switch engines. IndexTTS2 should have almost none.
 - **Term-translation mismatch** — the dub says "快照" but the screen shows "snapshot." This means a clause-2 term (on-screen content) was wrongly translated. Audit the term list against the video.
-- **Audio gaps** — silence where there should be speech. A cue failed to synthesize (check `dubbed/_full/_segments/` for < 1KB files) or the placement is wrong (the assemble stage already asserts dub.wav total = raw duration and per-cue windows — re-run it with the log visible).
+- **Audio gaps** — silence where there should be speech. First run `cook dub audit-coverage`: a gap the transcript never captured (music-masked speech whisperX dropped) has no cue to synthesize and no pacing fix can fill it — repair per Step 3's coverage-audit block (splice, translate, synthesize the new takes). When the cache already exists, mid-file insertion shifts every later cue index onto the wrong take: append at the end, or shift `_segments/` by descending renames first. If coverage is clean, a cue failed to synthesize (check `dubbed/_full/_segments/` for < 1KB files) or the placement is wrong (the assemble stage already asserts dub.wav total = raw duration and per-cue windows — re-run it with the log visible). Music-present windows that went quiet are Demucs misroute, not missing speech — see "Window-level bed dropout" above.
 - **Subtitle overflow** — text clipped at screen edges. The `shorten --max-zh` is too high for the font size; hand-edit the merged SRT and re-run `cook dub assemble --keep-subs` (shorten runs inside assemble with a fixed limit; there is no standalone re-run).
 
 ## Fallback: 豆包 voice-clone 2.0 API
