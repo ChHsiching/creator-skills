@@ -229,8 +229,12 @@ trusting an existing script against a new voice:
    arithmetic the length gate does, with the measured rates in place of its
    generic planning bands. Lines under ~88% of their window budget need
    expansion (see "Filling the char budget"); lines over ~105% need cuts.
-4. The generic bands baked into `cook dub gate` (3.0/4.2/4.9) are planning
-   defaults, not physics — measured rates from the actual voice override them.
+4. Write the measured rates to the sidecar and re-gate with it:
+   `cook dub measure-rate --write dubbed/_reference/rate.json` then
+   `cook dub gate <output_root> <name> --rate-file dubbed/_reference/rate.json`.
+   Per-speaker rates come from the pairing with `speakers.txt`. A typed
+   `--rate` needs `--rate-override`; the sidecar is the canonical path
+   (rate-lock, SKILL.md Step 3).
 
 ## IndexTTS2 sampling — the live knobs
 
