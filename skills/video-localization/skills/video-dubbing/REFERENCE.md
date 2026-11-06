@@ -216,15 +216,20 @@ gate passes, and the dub lands as dead air or compression. Recalibrate before
 trusting an existing script against a new voice:
 
 1. **Stratified probe.** Pick 5-10 existing script lines per speaker across
-   length bands (roughly 15-25, 30-45, 50+ chars — the bands behave
-   differently). Synthesize each with the new reference + df (the production
-   worker config, not a one-off).
+   length bands (roughly under 15, 15-25, 30-45, 50+ chars — the bands
+   behave differently; leave <=8-syllable trap lines out of the probe). Synthesize each with the new reference + df (the
+   production worker config, not a one-off). Probe the under-15 band with
+   more than one line: it swings take to take (one run measured its 13-char
+   probe line at 7.7 chars/s while four other 10-14-char lines rendered at
+   4.6-5.6), so a single sample reads as whichever extreme that take landed
+   on.
 2. **Measure per band**, CJK-equivalent syllables per second: a CJK char is
    one syllable; an English word counts its vowel groups; a digit run counts
-   its digits. Observed on IndexTTS2 clones: ~15-25-char lines 4-5 syll/s,
-   ~30-50-char lines 5.5-6.5, chunked long cues 6-7; very short lines (<=8
-   syllables) drop to 2.6-3.0 (the short-line trap — never calibrate from
-   them).
+   its digits. Observed on IndexTTS2 clones: 9-14-char lines have no stable
+   rate (see the probe note above; budget from a multi-line probe, slowest
+   sample wins); ~15-25-char lines 4-5 syll/s, ~30-50-char lines 5.5-6.5,
+   chunked long cues 6-7; very short lines (<=8 syllables) drop to 2.6-3.0
+   (the short-line trap — never calibrate from them).
 3. **Re-check the script** against `window x band-rate` per cue, the same
    arithmetic the length gate does, with the measured rates in place of its
    generic planning bands. Lines under ~88% of their window budget need
